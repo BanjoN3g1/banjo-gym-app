@@ -1,7 +1,13 @@
 export const metadata = {
   title: "Banjo Fitness OS",
   description: "Personal gym tracker — PPL cut",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({ children }) {
