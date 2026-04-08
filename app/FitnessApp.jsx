@@ -128,22 +128,23 @@ function getApiKey() {
   return localStorage.getItem("banjo_api_key") || "";
 }
 
-async function callClaude(prompt, systemExtra = "") {
+async function callClaude(prompt, systemExtra = "", retries = 3) {
   const key = getApiKey();
   if (!key) return "Set your API key in Settings to enable AI coaching.";
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 600,
-        system: `You are an expert bodybuilding/physique coach AI for Banjo.
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 600,
+          system: `You are an expert bodybuilding/physique coach AI for Banjo.
 Key context: 5'4", ~143 lbs, goal: 137 lbs at 10% BF. PPL x2 split, 6 days/week.
 Goals: visible abs, adonis belt, serratus, capped lateral delts, bicep veins, chest separation.
 Daily: 1750 cal, 175g protein. Week ${weekNum()} — ${currentPhase().name} phase.
@@ -151,41 +152,60 @@ Progressive overload rule: add reps first → weight when top of range hit 2 ses
 On a cut: holding strength = success. No heavy PRs in weeks 3+.
 ${systemExtra}
 Be SHORT and punchy. Numbers only. Coach-speak. No fluff.`,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    return data.content?.[0]?.text || "No response.";
-  } catch {
-    return "AI unavailable.";
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      if (res.status === 529 || res.status === 503) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+          continue;
+        }
+        return "API overloaded — try again in a moment.";
+      }
+      const data = await res.json();
+      return data.content?.[0]?.text || "No response.";
+    } catch {
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1500));
+    }
   }
+  return "AI unavailable.";
 }
 
 // ─── CLAUDE SONNET (deep analysis) ──────────────────────────────────────────
-async function callClaudeSonnet(prompt, systemPrompt) {
+async function callClaudeSonnet(prompt, systemPrompt, retries = 3) {
   const key = getApiKey();
   if (!key) return "Set your API key in Settings to enable AI coaching.";
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    return data.content?.[0]?.text || "No response.";
-  } catch {
-    return "AI unavailable.";
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 2000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      if (res.status === 529 || res.status === 503) {
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, (attempt + 1) * 2500));
+          continue;
+        }
+        return "API overloaded — try again in a moment.";
+      }
+      const data = await res.json();
+      return data.content?.[0]?.text || "No response.";
+    } catch {
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 2000));
+    }
   }
+  return "AI unavailable.";
 }
 
 // ─── REST TIMER ──────────────────────────────────────────────────────────────
@@ -254,20 +274,14 @@ function RestTimer({ seconds, onDone, onSkip }) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("workout");
-  const [logs, setLogs] = useState({});
-  const [nutrition, setNutrition] = useState({});
-  const [sleep, setSleep] = useState({});
-  const [bodyweight, setBodyweight] = useState({});
+  // Lazy initializers: read localStorage synchronously on first render
+  // so child useEffects get real data immediately — no async loading race
+  const [logs, setLogs] = useState(() => store.get("logs") || {});
+  const [nutrition, setNutrition] = useState(() => store.get("nutrition") || {});
+  const [sleep, setSleep] = useState(() => store.get("sleep") || {});
+  const [bodyweight, setBodyweight] = useState(() => store.get("bodyweight") || {});
   const [apiKey, setApiKey] = useState(getApiKey());
-  const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => {
-    setLogs(store.get("logs") || {});
-    setNutrition(store.get("nutrition") || {});
-    setSleep(store.get("sleep") || {});
-    setBodyweight(store.get("bodyweight") || {});
-    if (!getApiKey()) setShowSettings(true);
-  }, []);
+  const [showSettings, setShowSettings] = useState(!getApiKey());
 
   const saveLog = useCallback((date, workout, data) => {
     const next = { ...logs, [date]: { ...logs[date], [workout]: data } };
@@ -419,22 +433,35 @@ function WorkoutTab({ logs, saveLog }) {
     setCustomExercises(store.get("custom_exercises") || {});
   }, []);
 
+  // Re-run when date or workout changes, OR when logs update from a save
+  // Use a ref to avoid resetting exerciseData mid-edit on every keystroke
+  const lastLoadKeyRef = useRef(null);
   useEffect(() => {
+    const loadKey = `${logDate}::${selectedDay}`;
     const existing = logs[logDate]?.[selectedDay];
+    // Only reload if the date/workout actually changed (not just a logs reference update)
+    if (lastLoadKeyRef.current === loadKey && !existing) return;
+    if (lastLoadKeyRef.current === loadKey && existing) {
+      // date/workout same — only reload if we don't have unsaved edits (saved===true means just saved, safe to reload)
+      // We allow reload only on initial mount for a given key
+      return;
+    }
+    lastLoadKeyRef.current = loadKey;
     if (existing) {
       const { _notes, _overrides, ...exData } = existing;
       setOverrides(_overrides || {});
       setExerciseData(normalizeExerciseData(exData, workout, _overrides || {}));
       setSessionNotes(_notes || "");
+      setSaved(true); // Mark as saved since we loaded existing data
     } else {
       setOverrides({});
       setExerciseData(buildEmptyExerciseData(workout));
       setSessionNotes("");
+      setSaved(false);
     }
-    setSaved(false);
     setSuggestions({});
     setAnalysis("");
-  }, [selectedDay, logDate]);
+  }, [selectedDay, logDate, logs]);
 
   function buildEmptyExerciseData(wkt) {
     const data = {};
@@ -989,128 +1016,274 @@ function SwapModal({ originalEx, customExercises, onConfirm, onCancel }) {
 // ─── HISTORY VIEW ─────────────────────────────────────────────────────────────
 function HistoryView({ logs, selectedDay, onSelectDay, onClose, workout, customExercises = {} }) {
   const [activeDay, setActiveDay] = useState(selectedDay);
+  const [view, setView] = useState("sessions"); // "sessions" | "progress"
   const [expandedDate, setExpandedDate] = useState(null);
+  const [expandedExercise, setExpandedExercise] = useState(null);
 
   const wkt = PLAN.workouts[activeDay];
 
-  // Get all sessions for this workout type, newest first
   const sessions = Object.entries(logs)
     .filter(([, wkts]) => wkts[activeDay])
     .sort(([a], [b]) => b.localeCompare(a));
 
-  const getVolumeLabel = (sessionData) => {
-    let totalVolume = 0;
-    let hasData = false;
+  const sessionsAsc = [...sessions].reverse();
+
+  const getSessionVolume = (sessionData) => {
+    let vol = 0;
     Object.entries(sessionData).forEach(([key, val]) => {
       if (key.startsWith("_")) return;
       if (Array.isArray(val?.sets)) {
-        val.sets.forEach(s => {
-          if (s.weight && s.reps) {
-            totalVolume += parseFloat(s.weight) * parseInt(s.reps);
-            hasData = true;
-          }
-        });
+        val.sets.forEach(s => { if (s.weight && s.reps) vol += parseFloat(s.weight) * parseInt(s.reps); });
       }
     });
-    return hasData ? `${Math.round(totalVolume).toLocaleString()} lbs vol` : "Logged";
+    return Math.round(vol);
   };
+
+  // Get per-exercise history across all sessions (for progress charts)
+  const getExerciseHistory = (ex) => {
+    return sessionsAsc.map(([date, wkts]) => {
+      const sessionData = wkts[activeDay];
+      const sessionOverrides = sessionData._overrides || {};
+      const override = sessionOverrides[ex.id];
+      const dataKey = override?.id || ex.id;
+      const val = sessionData[dataKey];
+      if (!val || !Array.isArray(val.sets)) return null;
+      const doneSets = val.sets.filter(s => s.reps);
+      if (!doneSets.length) return null;
+      const maxWeight = Math.max(...doneSets.map(s => parseFloat(s.weight || 0)));
+      const totalVol = doneSets.reduce((sum, s) => sum + parseFloat(s.weight || 0) * parseInt(s.reps || 0), 0);
+      const avgReps = doneSets.reduce((sum, s) => sum + parseInt(s.reps || 0), 0) / doneSets.length;
+      const bestSet = doneSets.reduce((best, s) => {
+        const val = parseFloat(s.weight || 0) * parseInt(s.reps || 0);
+        return val > (parseFloat(best.weight || 0) * parseInt(best.reps || 0)) ? s : best;
+      }, doneSets[0]);
+      return { date, maxWeight, totalVol: Math.round(totalVol), avgReps: Math.round(avgReps * 10) / 10, bestSet, setsLogged: doneSets.length };
+    }).filter(Boolean);
+  };
+
+  // Mini inline bar chart using CSS
+  function MiniChart({ data, valueKey, color, unit = "" }) {
+    if (data.length < 2) return <div style={{ fontSize: 10, color: "#2a2a2a", fontFamily: "'DM Mono', monospace" }}>Need 2+ sessions for chart</div>;
+    const vals = data.map(d => d[valueKey]);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = max - min || 1;
+    const latest = vals[vals.length - 1];
+    const prev = vals[vals.length - 2];
+    const trend = latest > prev ? "▲" : latest < prev ? "▼" : "—";
+    const trendColor = latest > prev ? "#c8f060" : latest < prev ? "#f06060" : "#555";
+
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 44, marginBottom: 6 }}>
+          {data.map((d, i) => {
+            const pct = range === 0 ? 50 : ((d[valueKey] - min) / range) * 100;
+            const isLast = i === data.length - 1;
+            return (
+              <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                <div style={{ width: "100%", height: `${Math.max(8, pct)}%`, background: isLast ? color : `${color}55`, borderRadius: "2px 2px 0 0", transition: "height 0.3s" }} title={`${fmtFull(d.date)}: ${d[valueKey]}${unit}`} />
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a" }}>{data[0] ? fmt(data[0].date) : ""}</span>
+          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: trendColor }}>{trend} {latest}{unit}</span>
+          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a" }}>NOW</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Volume chart across all sessions
+  const volumeData = sessionsAsc.map(([date, wkts]) => ({
+    date,
+    vol: getSessionVolume(wkts[activeDay]),
+  })).filter(d => d.vol > 0);
 
   return (
     <div className="fade-in" style={{ padding: 16 }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button
-          onClick={onClose}
-          style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, width: 36, height: 36, color: "#555", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
-          ←
-        </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <button onClick={onClose} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, width: 36, height: 36, color: "#555", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>←</button>
         <div>
           <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: wkt.color, lineHeight: 1 }}>HISTORY</div>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1.5 }}>{wkt.name} · {sessions.length} sessions logged</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1.5 }}>{wkt.name} · {sessions.length} sessions</div>
         </div>
       </div>
 
       {/* Workout selector */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
         {Object.entries(PLAN.workouts).map(([key, w]) => (
-          <button
-            key={key}
-            onClick={() => { setActiveDay(key); setExpandedDate(null); }}
-            style={{
-              background: activeDay === key ? w.color : "#0f0f0f",
-              color: activeDay === key ? "#080808" : "#333",
-              border: `1px solid ${activeDay === key ? w.color : "#1a1a1a"}`,
-              borderRadius: 10, padding: "9px 6px",
-              fontFamily: "'Bebas Neue', sans-serif", fontSize: 16,
-              transition: "all 0.15s",
-            }}
-          >
+          <button key={key} onClick={() => { setActiveDay(key); setExpandedDate(null); setExpandedExercise(null); }}
+            style={{ background: activeDay === key ? w.color : "#0f0f0f", color: activeDay === key ? "#080808" : "#333", border: `1px solid ${activeDay === key ? w.color : "#1a1a1a"}`, borderRadius: 10, padding: "9px 6px", fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, transition: "all 0.15s" }}>
             {w.name}
           </button>
         ))}
       </div>
 
-      {/* Session list */}
+      {/* View toggle: Sessions vs Progress */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 16 }}>
+        {[["sessions", "SESSION LOG"], ["progress", "PROGRESS"]].map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)}
+            style={{ background: view === v ? wkt.color : "#0f0f0f", color: view === v ? "#080808" : "#444", border: `1px solid ${view === v ? wkt.color : "#1a1a1a"}`, borderRadius: 10, padding: "9px", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1.5, transition: "all 0.15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {sessions.length === 0 ? (
         <div style={{ textAlign: "center", padding: 40, color: "#2a2a2a", fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: 1 }}>
           NO SESSIONS LOGGED YET
         </div>
-      ) : (
-        sessions.map(([date, wkts]) => {
-          const sessionData = wkts[activeDay];
-          const isExpanded = expandedDate === date;
+      ) : view === "sessions" ? (
+        // ── SESSION LOG ────────────────────────────────────────────
+        <div>
+          {sessions.map(([date, wkts]) => {
+            const sessionData = wkts[activeDay];
+            const isExpanded = expandedDate === date;
+            const vol = getSessionVolume(sessionData);
 
-          return (
-            <div key={date} style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 14, marginBottom: 8, overflow: "hidden" }}>
-              {/* Session row */}
-              <button
-                onClick={() => setExpandedDate(isExpanded ? null : date)}
-                style={{ width: "100%", background: "none", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}
-              >
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#e2e2e2", marginBottom: 3 }}>{fmtFull(date)}</div>
-                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#3a3a3a" }}>{getVolumeLabel(sessionData)}</div>
-                </div>
-                <span style={{ color: "#2a2a2a", fontSize: 11, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "none" }}>▼</span>
-              </button>
-
-              {/* Expanded detail */}
-              {isExpanded && (
-                <div style={{ padding: "0 14px 14px", borderTop: "1px solid #151515" }}>
-                  {PLAN.workouts[activeDay].exercises.map(ex => {
-                    const sessionOverrides = sessionData._overrides || {};
-                    const override = sessionOverrides[ex.id];
-                    const dataKey = override?.id || ex.id;
-                    const displayName = override ? (customExercises[override.id]?.name || override.name) : ex.name;
-                    const val = sessionData[dataKey];
-                    if (!val) return null;
-                    const sets = Array.isArray(val.sets) ? val.sets : [];
-                    const flatStr = sets.length > 0
-                      ? sets.map((s, i) => `S${i+1}: ${s.weight || "BW"}×${s.reps || "?"}${s.done ? "" : " ⚪"}`).join("  ")
-                      : val.weight ? `${val.sets}×${val.reps} @ ${val.weight}lbs` : null;
-                    if (!flatStr) return null;
-                    return (
-                      <div key={ex.id} style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "1px solid #131313" }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#888", marginBottom: 4 }}>
-                          {displayName}
-                          {override && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#f0a04060", marginLeft: 6 }}>⇄ sub</span>}
-                        </div>
-                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#444", lineHeight: 1.7 }}>{flatStr}</div>
-                      </div>
-                    );
-                  })}
-                  {sessionData._notes && (
-                    <div style={{ paddingTop: 10 }}>
-                      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", marginBottom: 4, letterSpacing: 1 }}>NOTES</div>
-                      <div style={{ fontSize: 12, color: "#555", lineHeight: 1.6 }}>{sessionData._notes}</div>
+            return (
+              <div key={date} style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 14, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setExpandedDate(isExpanded ? null : date)}
+                  style={{ width: "100%", background: "none", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: "#e2e2e2", marginBottom: 3 }}>{fmtFull(date)}</div>
+                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#3a3a3a" }}>
+                      {vol > 0 ? `${vol.toLocaleString()} lbs volume` : "Logged"}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                  <span style={{ color: "#2a2a2a", fontSize: 11, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+
+                {isExpanded && (
+                  <div style={{ padding: "0 14px 14px", borderTop: "1px solid #151515" }}>
+                    {PLAN.workouts[activeDay].exercises.map(ex => {
+                      const sessionOverrides = sessionData._overrides || {};
+                      const override = sessionOverrides[ex.id];
+                      const dataKey = override?.id || ex.id;
+                      const displayName = override ? (customExercises[override.id]?.name || override.name) : ex.name;
+                      const val = sessionData[dataKey];
+                      if (!val) return null;
+                      const sets = Array.isArray(val.sets) ? val.sets : [];
+                      const flatStr = sets.length > 0
+                        ? sets.map((s, i) => `S${i+1}: ${s.weight || "BW"}×${s.reps || "?"}${s.done ? " ✓" : ""}`).join("  ")
+                        : val.weight ? `${val.sets}×${val.reps} @ ${val.weight}lbs` : null;
+                      if (!flatStr) return null;
+                      return (
+                        <div key={ex.id} style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "1px solid #131313" }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#888", marginBottom: 4 }}>
+                            {displayName}
+                            {override && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#f0a04099", marginLeft: 6 }}>⇄ sub</span>}
+                          </div>
+                          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#444", lineHeight: 1.8 }}>{flatStr}</div>
+                        </div>
+                      );
+                    })}
+                    {sessionData._notes && (
+                      <div style={{ paddingTop: 10 }}>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2a2a2a", marginBottom: 4, letterSpacing: 1 }}>NOTES</div>
+                        <div style={{ fontSize: 12, color: "#555", lineHeight: 1.6 }}>{sessionData._notes}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        // ── PROGRESS VIEW ──────────────────────────────────────────
+        <div>
+          {/* Total volume trend */}
+          {volumeData.length >= 2 && (
+            <div style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 14, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#444", marginBottom: 10 }}>TOTAL SESSION VOLUME (lbs)</div>
+              <MiniChart data={volumeData} valueKey="vol" color={wkt.color} unit="" />
             </div>
-          );
-        })
+          )}
+
+          {/* Per-exercise progress */}
+          {PLAN.workouts[activeDay].exercises.map(ex => {
+            const history = getExerciseHistory(ex);
+            if (history.length === 0) return null;
+            const isExpanded = expandedExercise === ex.id;
+            const latest = history[history.length - 1];
+            const first = history[0];
+            const weightGain = latest.maxWeight - first.maxWeight;
+            const volGain = latest.totalVol - first.totalVol;
+
+            return (
+              <div key={ex.id} style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 14, marginBottom: 10, overflow: "hidden" }}>
+                <button onClick={() => setExpandedExercise(isExpanded ? null : ex.id)}
+                  style={{ width: "100%", background: "none", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "#e2e2e2", marginBottom: 5 }}>{ex.name}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: wkt.color, background: `${wkt.color}15`, padding: "2px 8px", borderRadius: 4 }}>
+                        BEST: {latest.maxWeight > 0 ? `${latest.maxWeight}lbs` : "BW"} × {latest.bestSet?.reps || "?"}
+                      </span>
+                      {weightGain !== 0 && (
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: weightGain > 0 ? "#c8f060" : "#f06060", background: weightGain > 0 ? "#c8f06015" : "#f0606015", padding: "2px 8px", borderRadius: 4 }}>
+                          {weightGain > 0 ? "+" : ""}{weightGain}lbs since start
+                        </span>
+                      )}
+                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", padding: "2px 8px", borderRadius: 4 }}>
+                        {history.length} sessions
+                      </span>
+                    </div>
+                  </div>
+                  <span style={{ color: "#2a2a2a", fontSize: 11, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "none", flexShrink: 0, marginLeft: 8 }}>▼</span>
+                </button>
+
+                {isExpanded && (
+                  <div style={{ padding: "0 14px 14px", borderTop: "1px solid #151515" }}>
+                    {/* Weight trend chart */}
+                    {history.length >= 2 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#333", letterSpacing: 1.5, marginBottom: 8 }}>TOP WEIGHT PER SESSION</div>
+                        <MiniChart data={history} valueKey="maxWeight" color={wkt.color} unit="lbs" />
+                      </div>
+                    )}
+
+                    {/* Volume trend chart */}
+                    {history.length >= 2 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#333", letterSpacing: 1.5, marginBottom: 8 }}>VOLUME PER SESSION (lbs)</div>
+                        <MiniChart data={history} valueKey="totalVol" color="#60b8f0" unit="" />
+                      </div>
+                    )}
+
+                    {/* Session by session table */}
+                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#333", letterSpacing: 1.5, marginBottom: 8 }}>ALL SESSIONS</div>
+                    {[...history].reverse().map((h, i) => (
+                      <div key={h.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #131313" }}>
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: i === 0 ? wkt.color : "#444" }}>{fmt(h.date)}</span>
+                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: i === 0 ? "#e2e2e2" : "#555" }}>
+                          {h.maxWeight > 0 ? `${h.maxWeight}lbs` : "BW"} · {h.setsLogged} sets · {h.totalVol.toLocaleString()} lbs vol
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Overall stats */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                      {[
+                        { label: "WEIGHT CHANGE", val: `${weightGain >= 0 ? "+" : ""}${weightGain}lbs`, color: weightGain > 0 ? "#c8f060" : weightGain < 0 ? "#f06060" : "#555" },
+                        { label: "VOL CHANGE", val: `${volGain >= 0 ? "+" : ""}${volGain.toLocaleString()}`, color: volGain > 0 ? "#c8f060" : "#555" },
+                      ].map(s => (
+                        <div key={s.label} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, padding: "10px 10px" }}>
+                          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: s.color, lineHeight: 1 }}>{s.val}</div>
+                          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#2a2a2a", letterSpacing: 1, marginTop: 3 }}>{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
