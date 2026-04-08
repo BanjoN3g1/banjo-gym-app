@@ -2,7 +2,7 @@
 // Handles: token exchange, token refresh, and data fetching
 // Client secret never leaves the server
 
-const CLIENT_ID = process.env.OURA_CLIENT_ID;
+const CLIENT_ID = "fe301c05-aceb-4b65-8c02-263cb21a5eb3";
 const CLIENT_SECRET = process.env.OURA_CLIENT_SECRET;
 const REDIRECT_URI = "https://banjo-gym-app.vercel.app/oura/callback";
 
@@ -35,6 +35,7 @@ export async function POST(request) {
         }),
       });
 
+      console.log("Using client_id:", CLIENT_ID, "secret length:", CLIENT_SECRET?.length ?? "UNDEFINED");
       const rawText = await res.text();
       console.log("Oura exchange status:", res.status, "body:", rawText);
       let data;
