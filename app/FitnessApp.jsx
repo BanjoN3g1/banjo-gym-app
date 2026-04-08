@@ -124,19 +124,88 @@ function playAlarm() {
 }
 
 // ─── OURA ────────────────────────────────────────────────────────────────────
+const OURA_CLIENT_ID = "fe301c05-aceb-4b65-8c02-263cb21a5eb3";
+const OURA_REDIRECT_URI = "https://banjo-gym-app.vercel.app/oura/callback";
+const OURA_SCOPES = "daily heartrate"; // daily covers sleep, activity, readiness
+
 function getOuraToken() {
-  return localStorage.getItem("oura_pat") || "";
+  return localStorage.getItem("oura_access_token") || "";
 }
 
-async function fetchOura(endpoint, params) {
+function isOuraConnected() {
   const token = getOuraToken();
-  if (!token) return null;
+  if (!token) return false;
+  const expiry = parseInt(localStorage.getItem("oura_token_expiry") || "0");
+  // Consider expired if within 1 hour of expiry
+  return expiry === 0 || expiry > Date.now() + 3600000;
+}
+
+function connectOura() {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: OURA_CLIENT_ID,
+    redirect_uri: OURA_REDIRECT_URI,
+    scope: OURA_SCOPES,
+  });
+  window.location.href = `https://cloud.ouraring.com/oauth/authorize?${params}`;
+}
+
+function disconnectOura() {
+  localStorage.removeItem("oura_access_token");
+  localStorage.removeItem("oura_refresh_token");
+  localStorage.removeItem("oura_token_expiry");
+}
+
+async function refreshOuraToken() {
+  const refreshToken = localStorage.getItem("oura_refresh_token");
+  if (!refreshToken) return false;
   try {
     const res = await fetch("/api/oura", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, endpoint, params }),
+      body: JSON.stringify({ action: "refresh", refresh_token: refreshToken }),
     });
+    const data = await res.json();
+    if (!res.ok || !data.access_token) return false;
+    localStorage.setItem("oura_access_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("oura_refresh_token", data.refresh_token);
+    const expiry = Date.now() + (data.expires_in || 2592000) * 1000;
+    localStorage.setItem("oura_token_expiry", String(expiry));
+    return true;
+  } catch { return false; }
+}
+
+async function fetchOura(endpoint, params) {
+  let token = getOuraToken();
+  if (!token) return null;
+
+  // Auto-refresh if near expiry
+  const expiry = parseInt(localStorage.getItem("oura_token_expiry") || "0");
+  if (expiry > 0 && expiry < Date.now() + 3600000) {
+    const refreshed = await refreshOuraToken();
+    if (!refreshed) return null;
+    token = getOuraToken();
+  }
+
+  try {
+    const res = await fetch("/api/oura", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "fetch", token, endpoint, params }),
+    });
+    if (res.status === 401) {
+      // Try refresh once
+      const refreshed = await refreshOuraToken();
+      if (!refreshed) return null;
+      token = getOuraToken();
+      const retry = await fetch("/api/oura", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "fetch", token, endpoint, params }),
+      });
+      if (!retry.ok) return null;
+      return await retry.json();
+    }
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -338,7 +407,7 @@ export default function App() {
   const [sleep, setSleep] = useState(() => store.get("sleep") || {});
   const [bodyweight, setBodyweight] = useState(() => store.get("bodyweight") || {});
   const [apiKey, setApiKey] = useState(getApiKey());
-  const [ouraToken, setOuraToken] = useState(getOuraToken());
+  const [ouraConnected, setOuraConnected] = useState(isOuraConnected());
   const [showSettings, setShowSettings] = useState(!getApiKey());
 
   const saveLog = useCallback((date, workout, data) => {
@@ -370,10 +439,6 @@ export default function App() {
     localStorage.setItem("banjo_api_key", k);
   };
 
-  const saveOuraToken = (t) => {
-    setOuraToken(t);
-    localStorage.setItem("oura_pat", t);
-  };
 
   const tabs = [
     { id: "today",   label: "TODAY",   icon: "◈" },
@@ -426,11 +491,21 @@ export default function App() {
           <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 5 }}>ANTHROPIC API KEY</div>
           <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => saveApiKey(e.target.value)} style={{ marginBottom: 10, fontSize: 13 }} />
 
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 5 }}>OURA PERSONAL ACCESS TOKEN</div>
-          <input type="password" placeholder="Paste your Oura PAT..." value={ouraToken} onChange={e => saveOuraToken(e.target.value)} style={{ marginBottom: 6, fontSize: 13 }} />
-          <div style={{ fontSize: 10, color: "#2a2a2a", lineHeight: 1.6 }}>
-            Get your token at <span style={{ color: "#444" }}>cloud.ouraring.com → Account → Personal Access Tokens</span>. Used to sync sleep, HRV, steps, and readiness to TODAY tab.
-          </div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 8 }}>OURA RING</div>
+          {ouraConnected ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#08100a", border: "1px solid #1a3a22", borderRadius: 10, padding: "10px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#4a9a5a" }} />
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#4a9a5a", letterSpacing: 1 }}>CONNECTED</span>
+              </div>
+              <button onClick={() => { disconnectOura(); setOuraConnected(false); }} style={{ background: "none", color: "#444", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1 }}>DISCONNECT</button>
+            </div>
+          ) : (
+            <button onClick={connectOura} style={{ width: "100%", background: "#08100a", border: "1px solid #1a3a22", borderRadius: 10, padding: "12px", color: "#4a9a5a", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
+              CONNECT OURA RING →
+            </button>
+          )}
+          <div style={{ fontSize: 10, color: "#2a2a2a", marginTop: 6 }}>Syncs sleep, HRV, steps, and readiness to the TODAY tab.</div>
         </div>
       )}
 
@@ -1376,7 +1451,7 @@ function TodayTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, setTa
   const dayWorkoutKey = getDefaultWorkout();
   const dayWorkout = PLAN.workouts[dayWorkoutKey];
   const todayLogged = todayLog[dayWorkoutKey];
-  const hasOuraToken = !!getOuraToken();
+  const hasOuraToken = isOuraConnected();
 
   const handleSaveSleep = () => saveSleep(d, { hours: parseFloat(sleepHrs) || 0, quality: sleepQ, oura: ouraData || null });
   const handleSaveBW = () => saveBW(d, parseFloat(bw) || 0);
