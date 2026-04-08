@@ -123,6 +123,65 @@ function playAlarm() {
   try { navigator.vibrate([300, 100, 300, 100, 400]); } catch {}
 }
 
+// ─── OURA ────────────────────────────────────────────────────────────────────
+function getOuraToken() {
+  return localStorage.getItem("oura_pat") || "";
+}
+
+async function fetchOura(endpoint, params) {
+  const token = getOuraToken();
+  if (!token) return null;
+  try {
+    const res = await fetch("/api/oura", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, endpoint, params }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function syncOuraForDate(date) {
+  // Fetch sleep, activity, readiness in parallel
+  const [sleepRes, activityRes, readinessRes] = await Promise.all([
+    fetchOura("sleep", { start_date: date, end_date: date }),
+    fetchOura("daily_activity", { start_date: date, end_date: date }),
+    fetchOura("daily_readiness", { start_date: date, end_date: date }),
+  ]);
+
+  const result = {};
+
+  // Sleep — use longest sleep session for the night
+  if (sleepRes?.data?.length) {
+    const mainSleep = sleepRes.data.reduce((best, s) =>
+      (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best
+    , sleepRes.data[0]);
+    result.hours = Math.round((mainSleep.total_sleep_duration || 0) / 360) / 10;
+    result.score = mainSleep.score || null;
+    result.hrv = Math.round(mainSleep.average_hrv || 0) || null;
+    result.deepMins = Math.round((mainSleep.deep_sleep_duration || 0) / 60);
+    result.remMins = Math.round((mainSleep.rem_sleep_duration || 0) / 60);
+    result.efficiency = mainSleep.efficiency || null;
+    result.restingHR = Math.round(mainSleep.average_heart_rate || 0) || null;
+  }
+
+  // Steps + active calories
+  if (activityRes?.data?.length) {
+    const act = activityRes.data[0];
+    result.steps = act.steps || 0;
+    result.activeCalories = act.active_calories || 0;
+    result.activityScore = act.score || null;
+  }
+
+  // Readiness
+  if (readinessRes?.data?.length) {
+    result.readinessScore = readinessRes.data[0].score || null;
+  }
+
+  return Object.keys(result).length ? result : null;
+}
+
 // ─── AI ──────────────────────────────────────────────────────────────────────
 function getApiKey() {
   return localStorage.getItem("banjo_api_key") || "";
@@ -274,13 +333,12 @@ function RestTimer({ seconds, onDone, onSkip }) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("workout");
-  // Lazy initializers: read localStorage synchronously on first render
-  // so child useEffects get real data immediately — no async loading race
   const [logs, setLogs] = useState(() => store.get("logs") || {});
   const [nutrition, setNutrition] = useState(() => store.get("nutrition") || {});
   const [sleep, setSleep] = useState(() => store.get("sleep") || {});
   const [bodyweight, setBodyweight] = useState(() => store.get("bodyweight") || {});
   const [apiKey, setApiKey] = useState(getApiKey());
+  const [ouraToken, setOuraToken] = useState(getOuraToken());
   const [showSettings, setShowSettings] = useState(!getApiKey());
 
   const saveLog = useCallback((date, workout, data) => {
@@ -310,6 +368,11 @@ export default function App() {
   const saveApiKey = (k) => {
     setApiKey(k);
     localStorage.setItem("banjo_api_key", k);
+  };
+
+  const saveOuraToken = (t) => {
+    setOuraToken(t);
+    localStorage.setItem("oura_pat", t);
   };
 
   const tabs = [
@@ -355,18 +418,19 @@ export default function App() {
       {/* SETTINGS PANEL */}
       {showSettings && (
         <div className="fade-in" style={{ background: "#0d0d0d", borderBottom: "1px solid #1a1a1a", padding: "14px 16px" }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#444", marginBottom: 8 }}>ANTHROPIC API KEY</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              type="password"
-              placeholder="sk-ant-..."
-              value={apiKey}
-              onChange={e => saveApiKey(e.target.value)}
-              style={{ flex: 1, fontSize: 13 }}
-            />
-            <button onClick={() => setShowSettings(false)} style={{ background: "#c8f060", color: "#080808", padding: "0 16px", borderRadius: 8, fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1, whiteSpace: "nowrap" }}>DONE</button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#444" }}>SETTINGS</div>
+            <button onClick={() => setShowSettings(false)} style={{ background: "#c8f060", color: "#080808", padding: "5px 14px", borderRadius: 8, fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1 }}>DONE</button>
           </div>
-          <div style={{ fontSize: 10, color: "#333", marginTop: 6 }}>Stored locally on your device. Never sent anywhere except Anthropic.</div>
+
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 5 }}>ANTHROPIC API KEY</div>
+          <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => saveApiKey(e.target.value)} style={{ marginBottom: 10, fontSize: 13 }} />
+
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 5 }}>OURA PERSONAL ACCESS TOKEN</div>
+          <input type="password" placeholder="Paste your Oura PAT..." value={ouraToken} onChange={e => saveOuraToken(e.target.value)} style={{ marginBottom: 6, fontSize: 13 }} />
+          <div style={{ fontSize: 10, color: "#2a2a2a", lineHeight: 1.6 }}>
+            Get your token at <span style={{ color: "#444" }}>cloud.ouraring.com → Account → Personal Access Tokens</span>. Used to sync sleep, HRV, steps, and readiness to TODAY tab.
+          </div>
         </div>
       )}
 
@@ -1298,6 +1362,9 @@ function TodayTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, setTa
   const [bw, setBw] = useState(bodyweight[d] || "");
   const [sleepHrs, setSleepHrs] = useState(todaySleep.hours || "");
   const [sleepQ, setSleepQ] = useState(todaySleep.quality || "");
+  const [ouraData, setOuraData] = useState(todaySleep.oura || null);
+  const [ouraLoading, setOuraLoading] = useState(false);
+  const [ouraError, setOuraError] = useState("");
   const [aiTip, setAiTip] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -1306,34 +1373,52 @@ function TodayTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, setTa
   const isDrinkDay = todayNutrition.drinkDay;
   const macros = isDrinkDay ? DRINK_DAY_MACROS : NORMAL_MACROS;
 
-  // Detect today's workout
   const dayWorkoutKey = getDefaultWorkout();
   const dayWorkout = PLAN.workouts[dayWorkoutKey];
   const todayLogged = todayLog[dayWorkoutKey];
+  const hasOuraToken = !!getOuraToken();
 
-  const handleSaveSleep = () => saveSleep(d, { hours: parseFloat(sleepHrs) || 0, quality: sleepQ });
+  const handleSaveSleep = () => saveSleep(d, { hours: parseFloat(sleepHrs) || 0, quality: sleepQ, oura: ouraData || null });
   const handleSaveBW = () => saveBW(d, parseFloat(bw) || 0);
+
+  const syncOura = async () => {
+    if (!hasOuraToken) return;
+    setOuraLoading(true);
+    setOuraError("");
+    const data = await syncOuraForDate(d);
+    if (!data) {
+      setOuraError("No Oura data found for today — check your token in Settings.");
+      setOuraLoading(false);
+      return;
+    }
+    setOuraData(data);
+    // Auto-fill sleep hours from Oura
+    if (data.hours) setSleepHrs(String(data.hours));
+    // Auto-save with Oura data
+    saveSleep(d, { hours: data.hours || parseFloat(sleepHrs) || 0, quality: sleepQ, oura: data });
+    setOuraLoading(false);
+  };
 
   const getAiTip = async () => {
     setAiLoading(true);
     const recentLogs = Object.entries(logs).sort(([a], [b]) => b.localeCompare(a)).slice(0, 5)
       .map(([date, wkts]) => `${date}: ${Object.keys(wkts).map(w => PLAN.workouts[w]?.name || w).join("+")}`).join(", ");
+    const ouraContext = ouraData ? `Oura: sleep ${ouraData.hours}h, score ${ouraData.score || "?"}, HRV ${ouraData.hrv || "?"}ms, readiness ${ouraData.readinessScore || "?"}, steps ${ouraData.steps?.toLocaleString() || "?"}` : "";
     const tip = await callClaude(
-      `Today: ${d}. Recent workouts: ${recentLogs || "none"}. Sleep: ${sleepHrs || "?"}hrs. BW: ${bw || "?"}lbs. Cals so far: ${totalCal}/${macros.calories}. Protein: ${totalProt}/${macros.protein}g. Today's workout: ${dayWorkout.name}. Give a short, specific coaching tip for today.`
+      `Today: ${d}. Recent workouts: ${recentLogs || "none"}. Sleep: ${sleepHrs || "?"}hrs. BW: ${bw || "?"}lbs. Cals so far: ${totalCal}/${macros.calories}. Protein: ${totalProt}/${macros.protein}g. Today's workout: ${dayWorkout.name}. ${ouraContext}. Give a short, specific coaching tip for today.`
     );
     setAiTip(tip);
     setAiLoading(false);
   };
+
+  const od = ouraData;
 
   return (
     <div className="fade-in" style={{ padding: 16 }}>
       <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, marginBottom: 16, color: "#555" }}>{fmtFull(d)}</div>
 
       {/* TODAY'S WORKOUT CARD */}
-      <div
-        style={{ background: `linear-gradient(135deg, #0f1a08, #0a0a0a)`, border: `1px solid ${dayWorkout.color}22`, borderRadius: 14, padding: 16, marginBottom: 14, cursor: "pointer" }}
-        onClick={() => setTab("workout")}
-      >
+      <div style={{ background: `linear-gradient(135deg, #0f1a08, #0a0a0a)`, border: `1px solid ${dayWorkout.color}22`, borderRadius: 14, padding: 16, marginBottom: 14, cursor: "pointer" }} onClick={() => setTab("workout")}>
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: dayWorkout.color, letterSpacing: 2, marginBottom: 6 }}>TODAY'S WORKOUT</div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -1341,29 +1426,84 @@ function TodayTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, setTa
             <div style={{ fontSize: 12, color: "#444", marginTop: 3 }}>{dayWorkout.sub}</div>
           </div>
           <div style={{ textAlign: "right" }}>
-            {todayLogged ? (
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#c8f060" }}>✓ LOGGED</div>
-            ) : (
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, color: "#333" }}>START →</div>
-            )}
+            {todayLogged ? <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#c8f060" }}>✓ LOGGED</div>
+              : <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, color: "#333" }}>START →</div>}
           </div>
         </div>
       </div>
 
-      {/* QUICK STATS */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
+      {/* QUICK STATS — 4 stats if Oura connected */}
+      <div style={{ display: "grid", gridTemplateColumns: od ? "repeat(4, 1fr)" : "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
         {[
-          { label: "CALORIES", val: `${totalCal}`, sub: `/ ${macros.calories}`, color: totalCal >= macros.calories * 0.9 ? "#c8f060" : "#f0a040" },
+          { label: "CAL", val: `${totalCal}`, sub: `/ ${macros.calories}`, color: totalCal >= macros.calories * 0.9 ? "#c8f060" : "#f0a040" },
           { label: "PROTEIN", val: `${totalProt}g`, sub: `/ ${macros.protein}g`, color: totalProt >= macros.protein * 0.9 ? "#c8f060" : "#f0a040" },
-          { label: "SLEEP", val: sleepHrs ? `${sleepHrs}h` : "—", sub: sleepQ || "log it", color: parseFloat(sleepHrs) >= 7 ? "#c8f060" : "#f06060" },
+          { label: "SLEEP", val: sleepHrs ? `${sleepHrs}h` : "—", sub: od?.score ? `score ${od.score}` : (sleepQ || "log it"), color: parseFloat(sleepHrs) >= 7 ? "#c8f060" : "#f06060" },
+          ...(od ? [{ label: "READY", val: od.readinessScore ? `${od.readinessScore}` : "—", sub: od.steps ? `${Math.round(od.steps/1000)}k steps` : "steps —", color: od.readinessScore >= 70 ? "#c8f060" : od.readinessScore >= 50 ? "#f0a040" : "#f06060" }] : []),
         ].map(s => (
-          <div key={s.label} style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 12, padding: "12px 10px" }}>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, color: s.color, lineHeight: 1 }}>{s.val}</div>
+          <div key={s.label} style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 12, padding: "12px 8px" }}>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: s.color, lineHeight: 1 }}>{s.val}</div>
             <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, letterSpacing: 1.5, color: "#2a2a2a", marginTop: 3 }}>{s.label}</div>
-            <div style={{ fontSize: 10, color: "#444", marginTop: 2 }}>{s.sub}</div>
+            <div style={{ fontSize: 9, color: "#444", marginTop: 2 }}>{s.sub}</div>
           </div>
         ))}
       </div>
+
+      {/* OURA DETAIL CARD — shown once synced */}
+      {od && (
+        <div style={{ background: "#08100a", border: "1px solid #1a3a22", borderRadius: 14, padding: 14, marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#4a9a5a" }}>OURA RING</div>
+            <button onClick={syncOura} disabled={ouraLoading} style={{ background: "none", color: "#2a5a3a", fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1 }}>
+              {ouraLoading ? "SYNCING..." : "↻ REFRESH"}
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: od.hrv ? 10 : 0 }}>
+            {[
+              { label: "SLEEP", val: od.hours ? `${od.hours}h` : "—", sub: od.efficiency ? `${od.efficiency}% eff` : "" },
+              { label: "HRV", val: od.hrv ? `${od.hrv}ms` : "—", sub: od.restingHR ? `${od.restingHR} bpm RHR` : "" },
+              { label: "STEPS", val: od.steps ? `${Math.round(od.steps/1000*10)/10}k` : "—", sub: od.activeCalories ? `${od.activeCalories} kcal` : "" },
+            ].map(s => (
+              <div key={s.label} style={{ background: "#0a1a0f", border: "1px solid #1a2a1e", borderRadius: 10, padding: "10px 8px" }}>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#5aaa6a", lineHeight: 1 }}>{s.val}</div>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#2a4a30", letterSpacing: 1, marginTop: 3 }}>{s.label}</div>
+                {s.sub && <div style={{ fontSize: 9, color: "#3a6a44", marginTop: 2 }}>{s.sub}</div>}
+              </div>
+            ))}
+          </div>
+          {od.hrv && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[
+                { label: "DEEP SLEEP", val: od.deepMins ? `${od.deepMins}m` : "—" },
+                { label: "REM SLEEP", val: od.remMins ? `${od.remMins}m` : "—" },
+              ].map(s => (
+                <div key={s.label} style={{ background: "#0a1a0f", border: "1px solid #1a2a1e", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a4a30", letterSpacing: 1 }}>{s.label}</span>
+                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#5aaa6a" }}>{s.val}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Steps progress toward 10k goal */}
+          {od.steps > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#2a4a30", marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>
+                <span>STEPS</span><span>{od.steps?.toLocaleString()} / 10,000</span>
+              </div>
+              <div style={{ height: 3, background: "#0f2a14", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.min(100, (od.steps / 10000) * 100)}%`, background: od.steps >= 10000 ? "#c8f060" : "#4a9a5a", borderRadius: 2 }} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* OURA SYNC BUTTON — shown if token set but not yet synced */}
+      {hasOuraToken && !od && (
+        <button onClick={syncOura} disabled={ouraLoading} style={{ width: "100%", background: ouraLoading ? "#0a0a0a" : "#08100a", border: "1px solid #1a3a22", borderRadius: 12, padding: "12px", marginBottom: 12, color: ouraLoading ? "#2a4a30" : "#4a9a5a", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
+          {ouraLoading ? <span className="shimmer">SYNCING OURA...</span> : "⟳ SYNC FROM OURA RING"}
+        </button>
+      )}
+      {ouraError && <div style={{ fontSize: 11, color: "#f06060", marginBottom: 10, paddingLeft: 2 }}>{ouraError}</div>}
 
       {/* PROGRESS BARS */}
       <div style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 12, padding: 14, marginBottom: 10 }}>
@@ -1391,16 +1531,15 @@ function TodayTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, setTa
           <input type="number" placeholder="lbs" step="0.1" value={bw} onChange={e => setBw(e.target.value)} style={{ flex: 1 }} />
           <button onClick={handleSaveBW} style={{ background: "#c8f060", color: "#080808", padding: "0 18px", borderRadius: 10, fontSize: 12, fontWeight: 500, fontFamily: "inherit", whiteSpace: "nowrap" }}>SAVE</button>
         </div>
-        {bodyweight[d] && (
-          <div style={{ fontSize: 11, color: "#444", marginTop: 8 }}>
-            {bodyweight[d]} lbs · {(bodyweight[d] - PLAN.targetWeight).toFixed(1)} lbs from goal
-          </div>
-        )}
+        {bodyweight[d] && <div style={{ fontSize: 11, color: "#444", marginTop: 8 }}>{bodyweight[d]} lbs · {(bodyweight[d] - PLAN.targetWeight).toFixed(1)} lbs from goal</div>}
       </div>
 
-      {/* SLEEP LOG */}
+      {/* SLEEP — manual input (pre-filled by Oura if synced) */}
       <div style={{ background: "#0f0f0f", border: "1px solid #1a1a1a", borderRadius: 12, padding: 14, marginBottom: 10 }}>
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#2a2a2a", marginBottom: 10 }}>SLEEP</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#2a2a2a" }}>SLEEP</div>
+          {od && <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#4a9a5a", letterSpacing: 1 }}>⟳ FROM OURA</div>}
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <input type="number" placeholder="Hours (e.g. 7.5)" step="0.5" min="0" max="12" value={sleepHrs} onChange={e => setSleepHrs(e.target.value)} />
           <select value={sleepQ} onChange={e => setSleepQ(e.target.value)} style={{ background: "#111", border: "1px solid #222", color: sleepQ ? "#e2e2e2" : "#555", borderRadius: 10, padding: "10px 12px" }}>
