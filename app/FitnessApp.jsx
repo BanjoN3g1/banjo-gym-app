@@ -89,6 +89,74 @@ const currentPhase = () => {
   return PLAN.phases.find(p => p.weeks.includes(w)) || PLAN.phases[0];
 };
 
+// ─── WEEK-SPECIFIC COACHING CONTEXT ─────────────────────────────────────────
+const getWeekContext = () => {
+  const w = weekNum();
+  const phase = currentPhase();
+  const daysLeft = Math.max(0, Math.ceil((new Date(PLAN.targetDate + "T12:00:00") - new Date()) / 86400000));
+
+  const weekGuidance = {
+    1: {
+      label: "Week 1 — RECALIBRATE",
+      directive: "Establish baseline working weights. No failure. 3 RIR on all sets. The goal this week is finding the right starting loads and rebuilding the mind-muscle connection after any layoff. Do NOT push — we're calibrating, not testing limits.",
+      overload: "Do NOT progress weight yet. Log what feels like a solid 3 RIR and use that as the baseline for week 2.",
+      recovery: "High. You should feel good leaving the gym. If anything is sore beyond normal DOMS, the weight was too heavy.",
+      intensity: "65-70% of max effort. Leave plenty in reserve.",
+    },
+    2: {
+      label: "Week 2 — RECALIBRATE (final week)",
+      directive: "Add reps or small weight bumps where week 1 felt very easy (3+ RIR). Still conservative — 2 RIR minimum. This week sets the floor for the cut. Anything you establish here as your 'working weight' is what we protect through weeks 3-5.",
+      overload: "If you hit the top of the rep range easily in week 1, you can add the minimum increment this week. Otherwise hold and add reps.",
+      recovery: "Should still feel fresh. Sleep and nutrition compliance matters now.",
+      intensity: "70-75% effort. Starting to feel like real work.",
+    },
+    3: {
+      label: "Week 3 — MAIN CUT (week 1 of deficit)",
+      directive: "Caloric deficit is now in effect and glycogen will be slightly lower. HOLD week 2 weights exactly. Do not push for new reps if energy is off. This is the adaptation week — the body is adjusting to the deficit and strength may feel slightly suppressed. That is normal and expected.",
+      overload: "Freeze progression this week. Holding week 2 numbers = success. If you hit top of range, note it but don't increase yet — confirm twice before progressing on a cut.",
+      recovery: "Monitor carefully. HRV dip or elevated resting HR means recovery is lagging — reduce rest times, not weights.",
+      intensity: "75-80% effort. Work is real but failure is never acceptable on a cut.",
+    },
+    4: {
+      label: "Week 4 — MAIN CUT (deepest fatigue week)",
+      directive: "Statistically the hardest week of any cut. Accumulated deficit, potential sleep disruption, and neuromuscular fatigue all peak here. HOLDING strength at week 2-3 numbers is a genuine achievement. Do not compare to a bulk. If you drop 1-2 reps on a set, that is acceptable — do not reduce weight, just note it.",
+      overload: "Only progress if you hit top of rep range AND felt strong AND HRV/sleep were good. Otherwise hold.",
+      recovery: "Critical. Sleep 8hrs minimum. Protein at 175g non-negotiable — muscle is at highest risk of catabolism this week.",
+      intensity: "80% effort. RPE 7-8 on work sets. No 9s or 10s.",
+    },
+    5: {
+      label: "Week 5 — MAIN CUT (final push before peak)",
+      directive: "Last week of the deficit phase. Body composition is changing visibly now. Fatigue is accumulated but the end is in sight. Focus entirely on execution quality — slow eccentrics, peak contraction, full ROM. Volume is more important than load this week for visual conditioning.",
+      overload: "No new PRs. Hold week 3-4 weights. If anything feels off, slight volume reduction (1 set per exercise) is acceptable but do NOT reduce load.",
+      recovery: "Begin thinking about peak week. Sleep and steps compliance here directly impacts how you look May 15.",
+      intensity: "75-80%. Back off slightly from week 4 intensity to set up a strong peak week.",
+    },
+    6: {
+      label: "Week 6 — PEAK (begin peak protocol)",
+      directive: "Shift to peak phase. Reduce total volume by 15-20% (cut 1 working set per exercise) but INCREASE relative intensity. Carbs may come up slightly this week — use that energy. Compounds stay heavy. Isolation work shifts to pump-focused higher reps for fullness. The goal is looking FULL and DRY, not just lean.",
+      overload: "Hold or slightly increase compound weights if energy allows from carb increase. Isolation exercises: increase reps, not weight.",
+      recovery: "Reduce steps slightly to 7-8k to reduce glycogen depletion. Prioritize sleep absolutely.",
+      intensity: "85% on compounds. 70% on isolations — chase the pump, not the weight.",
+    },
+    7: {
+      label: "Week 7 — PEAK (final week, May 15 target)",
+      directive: "Final week. This is about LOOKING your best on May 15, not training progress. Volume is low. Intensity is high on compounds. No new exercises. No failure. The physique is built — this week is just manipulation. Carb cycle if possible: higher carbs 2 days out to fill muscle glycogen. Reduce sodium Thursday-Friday. Stay active but don't deplete.",
+      overload: "Zero progression pressure. Maintain weights from week 6. This is a performance week, not a growth week.",
+      recovery: "Everything. Sleep 9hrs if possible. Zero stress. Walk but don't exhaust yourself.",
+      intensity: "Compounds: 85-90% intensity, 50-60% volume. Isolations: pure pump, moderate weight.",
+    },
+  };
+
+  const wg = weekGuidance[w] || weekGuidance[1];
+  return `
+CURRENT WEEK: ${wg.label} | ${daysLeft} days until May 15 photo
+PHASE DIRECTIVE: ${wg.directive}
+PROGRESSIVE OVERLOAD THIS WEEK: ${wg.overload}
+RECOVERY CONTEXT: ${wg.recovery}
+INTENSITY TARGET: ${wg.intensity}
+`.trim();
+};
+
 // Auto-detect workout from day of week
 const getDefaultWorkout = () => {
   const day = new Date().getDay(); // 0=Sun,1=Mon,...
@@ -273,13 +341,15 @@ async function callClaude(prompt, systemExtra = "", retries = 3) {
           model: "claude-haiku-4-5-20251001",
           max_tokens: 600,
           system: `You are an expert bodybuilding/physique coach AI for Banjo.
-Key context: 5'4", ~143 lbs, goal: 137 lbs at 10% BF. PPL x2 split, 6 days/week.
+Client: 5'4", ~143 lbs, goal: 137 lbs at 10% BF. PPL x2 split, 6 days/week.
 Goals: visible abs, adonis belt, serratus, capped lateral delts, bicep veins, chest separation.
-Daily: 1750 cal, 175g protein. Week ${weekNum()} — ${currentPhase().name} phase.
-Progressive overload rule: add reps first → weight when top of range hit 2 sessions in a row.
-On a cut: holding strength = success. No heavy PRs in weeks 3+.
+Daily: 1750 cal, 175g protein. History: gyno surgery 2023 + flank lipo — upper chest is muscle tissue issue, not fat.
+
+${getWeekContext()}
+
+Progressive overload rule: add reps first → weight only when top of rep range hit 2 sessions in a row AND phase allows it.
 ${systemExtra}
-Be SHORT and punchy. Numbers only. Coach-speak. No fluff.`,
+Be SHORT and punchy. Specific numbers only. Coach-speak. No fluff.`,
           messages: [{ role: "user", content: prompt }]
         })
       });
@@ -787,11 +857,15 @@ Total volume this exercise: ${Math.round(totalVol)} lbs`;
         }).filter(Boolean).join("\n");
     })() : "No previous session data.";
 
+    const weekCtx = getWeekContext();
+
     const systemPrompt = `You are a world-class PhD-level exercise scientist, elite bodybuilding coach, and sports nutritionist with 20+ years of applied research and coaching experience. You combine deep academic expertise in exercise physiology (hypertrophy mechanisms: mechanical tension, metabolic stress, muscle damage; motor unit recruitment; neuromuscular adaptations; energy systems; hormonal responses to training) with practical elite-level bodybuilding coaching (periodization, progressive overload, exercise selection, mind-muscle connection, intra-workout fatigue management).
 
-Your client is Banjo: 5'4", ~143 lbs, targeting 137 lbs at 10% body fat. Currently in Week ${weekNum()} (${currentPhase().name} phase) of a 47-day aesthetic cut running PPL x2/week. Goals: visible abs, adonis belt, visible serratus, capped lateral delts, bicep vascularity, chest separation. Daily: 1750 cal, 175g protein. History of gyno surgery 2023 + flank lipo — upper chest development is a muscle tissue limitation, not fat.
+CLIENT — BANJO: 5'4", ~143 lbs, targeting 137 lbs at 10% body fat. PPL x2/week, 47-day aesthetic cut. Goals: visible abs, adonis belt, visible serratus, capped lateral delts, bicep vascularity, chest separation. Daily: 1750 cal, 175g protein. History of gyno surgery 2023 + flank lipo — upper chest development is a muscle tissue limitation, not fat.
 
-Key coaching philosophy: On a cut, HOLDING strength = success. Double progression (reps first, then weight). 1 RIR minimum on work sets to avoid CNS burnout. Prioritize mechanical tension over metabolic fatigue on compound lifts.
+${weekCtx}
+
+COACHING PHILOSOPHY: On a cut, HOLDING strength = success. Double progression (reps first, then weight when top of range hit 2x AND phase allows). 1 RIR minimum on all work sets. Prioritize mechanical tension over metabolic fatigue on compounds. Judge everything through the lens of where we are in the 7-week plan — what's appropriate in week 2 is very different from week 5 or week 7.
 
 Analyze with the precision of a world-class coach reviewing competition prep data. Be direct, specific, science-backed. Use numbered sections. Be thorough but actionable.`;
 
@@ -804,14 +878,14 @@ SESSION NOTES FROM ATHLETE: "${sessionNotes || "None provided"}"
 COMPARISON DATA:
 ${lastSessionStr}
 
-Provide a comprehensive post-workout analysis covering:
-1. OVERALL SESSION GRADE & SUMMARY (A-F with rationale)
-2. EXERCISE-BY-EXERCISE BREAKDOWN (performance vs targets, form cues if notes suggest issues, volume adequacy)
-3. PROGRESSIVE OVERLOAD STATUS (what progressed, stalled, or regressed vs last session — and why it matters physiologically)
-4. MUSCLE GROUP STIMULUS QUALITY (rate the mechanical tension and metabolic stress achieved for each target muscle based on exercise selection and loads used)
-5. RECOVERY SIGNALS (any red flags in the data suggesting overreaching, CNS fatigue, or inadequate recovery)
-6. NEXT SESSION DIRECTIVES (exact weight/rep targets for each exercise — specific numbers only)
-7. ONE PRIORITY FOCUS for the next session based on today's data`;
+Provide a comprehensive post-workout analysis — judge everything through the lens of ${weekCtx.split('\n')[0]}:
+1. OVERALL SESSION GRADE & SUMMARY (A-F with rationale specific to this week's goals)
+2. EXERCISE-BY-EXERCISE BREAKDOWN (performance vs targets, form cues if notes suggest issues, volume adequacy for this phase)
+3. PROGRESSIVE OVERLOAD STATUS (what progressed, stalled, or regressed vs last session — is that appropriate for this week or a red flag?)
+4. MUSCLE GROUP STIMULUS QUALITY (rate the mechanical tension and metabolic stress for each target muscle — is it sufficient for the phase goals?)
+5. RECOVERY SIGNALS (any red flags suggesting overreaching, CNS fatigue, or inadequate recovery — especially important given where we are in the cut)
+6. NEXT SESSION DIRECTIVES — exact weight/rep targets for each exercise, calibrated to the phase directive above. Be specific with numbers.
+7. ONE PRIORITY FOCUS for the next session based on today's data and where we are in the 7-week plan`;
 
     const result = await callClaudeSonnet(prompt, systemPrompt);
     setAnalysis(result);
