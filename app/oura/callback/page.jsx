@@ -33,7 +33,7 @@ function OuraCallbackInner() {
 
         const data = await res.json();
         if (!res.ok || !data.access_token) {
-          setError(data.error || "Token exchange failed.");
+          setError(`${data.error || "Token exchange failed"} — ${JSON.stringify(data.detail || data)}`);
           return;
         }
 

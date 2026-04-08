@@ -35,9 +35,12 @@ export async function POST(request) {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) return Response.json({ error: "Token exchange failed", detail: data }, { status: 400 });
-      return Response.json(data); // { access_token, refresh_token, expires_in, token_type }
+      const rawText = await res.text();
+      console.log("Oura exchange status:", res.status, "body:", rawText);
+      let data;
+      try { data = JSON.parse(rawText); } catch { data = { raw: rawText }; }
+      if (!res.ok) return Response.json({ error: "Token exchange failed", oura_status: res.status, detail: data }, { status: 400 });
+      return Response.json(data);
     }
 
     // ── Refresh an expired token ──────────────────────────────────
