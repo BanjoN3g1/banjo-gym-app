@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── PLAN DATA ────────────────────────────────────────────────────────────────
 const PLAN = {
-  startDate: "2025-03-29",
-  targetDate: "2025-05-15",
+  startDate: "2026-03-29",
+  targetDate: "2026-05-15",
   targetWeight: 137,
   targetBF: 10,
   dailyCalories: 1750,
