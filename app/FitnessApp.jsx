@@ -184,12 +184,20 @@ function playBeep(freq = 880, duration = 0.3) {
 }
 
 function playAlarm() {
-  // Three ascending beeps
   playBeep(660, 0.2);
   setTimeout(() => playBeep(770, 0.2), 250);
   setTimeout(() => playBeep(880, 0.4), 500);
   try { navigator.vibrate([300, 100, 300, 100, 400]); } catch {}
 }
+
+// ─── HAPTICS ─────────────────────────────────────────────────────────────────
+const haptic = {
+  light:   () => { try { navigator.vibrate(18); } catch {} },
+  medium:  () => { try { navigator.vibrate(42); } catch {} },
+  heavy:   () => { try { navigator.vibrate(80); } catch {} },
+  success: () => { try { navigator.vibrate([50, 30, 80]); } catch {} },
+  tick:    () => { try { navigator.vibrate(12); } catch {} },
+};
 
 // ─── OURA ────────────────────────────────────────────────────────────────────
 const OURA_CLIENT_ID = "fe301c05-aceb-4b65-8c02-263cb21a5eb3";
@@ -407,7 +415,7 @@ async function callClaudeSonnet(prompt, systemPrompt, retries = 3) {
 }
 
 // ─── REST TIMER ──────────────────────────────────────────────────────────────
-function RestTimer({ seconds, onDone, onSkip }) {
+function RestTimer({ seconds, onDone, onSkip, nextSetHint }) {
   const [remaining, setRemaining] = useState(seconds);
   const intervalRef = useRef(null);
 
@@ -420,51 +428,117 @@ function RestTimer({ seconds, onDone, onSkip }) {
           setTimeout(onDone, 800);
           return 0;
         }
-        if (r === 11) playBeep(440, 0.1); // 10s warning beep
+        if (r <= 10) {
+          haptic.tick();
+          if (r === 11) playBeep(440, 0.1);
+        }
         return r - 1;
       });
     }, 1000);
     return () => clearInterval(intervalRef.current);
   }, []);
 
-  const pct = ((seconds - remaining) / seconds) * 100;
+  const circumference = 2 * Math.PI * 90;
+  const strokeDashoffset = circumference * (1 - remaining / seconds);
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
   const urgent = remaining <= 10;
+  const accent = urgent ? "#f0a040" : "#c8f060";
 
   return (
     <div style={{
-      position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
-      background: urgent ? "#1a0a00" : "#0a1a00",
-      borderBottom: `2px solid ${urgent ? "#f0a040" : "#c8f060"}`,
-      padding: "10px 16px",
+      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+      zIndex: 999,
+      background: "rgba(5,5,5,0.97)",
+      backdropFilter: "blur(8px)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      maxWidth: 480, margin: "0 auto",
     }}>
-      {/* Progress bar */}
-      <div style={{ height: 2, background: "#111", borderRadius: 1, marginBottom: 8, overflow: "hidden" }}>
-        <div style={{
-          height: "100%",
-          width: `${pct}%`,
-          background: urgent ? "#f0a040" : "#c8f060",
-          transition: "width 1s linear",
-          borderRadius: 1,
-        }} />
+      {/* Label */}
+      <div style={{
+        fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 4,
+        color: urgent ? "#f0a04055" : "#2a2a2a",
+        marginBottom: 40,
+        transition: "color 0.4s",
+      }}>
+        {urgent ? "GET READY" : "REST"}
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 2, color: urgent ? "#f0a040" : "#c8f060", marginBottom: 2 }}>
-            {urgent ? "GET READY" : "REST"}
-          </div>
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 36, color: urgent ? "#f0a040" : "#ffffff", lineHeight: 1, letterSpacing: 1 }}>
-            {mins > 0 ? `${mins}:${String(secs).padStart(2,"0")}` : `${secs}s`}
-          </div>
-        </div>
-        <button
-          onClick={onSkip}
-          style={{ background: "#1a1a1a", color: "#555", border: "1px solid #2a2a2a", borderRadius: 6, padding: "8px 16px", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1 }}
+
+      {/* Ring + countdown */}
+      <div style={{ position: "relative", width: 220, height: 220, marginBottom: 40 }}>
+        <svg
+          width="220" height="220"
+          style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}
         >
-          SKIP
-        </button>
+          {/* Track */}
+          <circle cx="110" cy="110" r="90" fill="none" stroke="#161616" strokeWidth="6" />
+          {/* Progress */}
+          <circle
+            cx="110" cy="110" r="90"
+            fill="none"
+            stroke={accent}
+            strokeWidth="6"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            style={{ transition: "stroke-dashoffset 1s linear, stroke 0.4s ease" }}
+          />
+        </svg>
+        <div style={{
+          position: "absolute", inset: 0,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            fontFamily: "'Bebas Neue', sans-serif",
+            fontSize: 76,
+            color: urgent ? "#f0a040" : "#f0f0f0",
+            lineHeight: 1,
+            letterSpacing: 2,
+            textShadow: urgent ? "0 0 40px rgba(240,160,64,0.3)" : "none",
+            transition: "color 0.4s, text-shadow 0.4s",
+          }}>
+            {mins > 0 ? `${mins}:${String(secs).padStart(2, "0")}` : secs}
+          </div>
+          {mins === 0 && (
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 8,
+              color: "#2a2a2a", letterSpacing: 2, marginTop: 4,
+            }}>SECONDS</div>
+          )}
+        </div>
       </div>
+
+      {/* Next set hint */}
+      {nextSetHint && (
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#333",
+          letterSpacing: 2, marginBottom: 12, textAlign: "center",
+        }}>
+          {nextSetHint}
+        </div>
+      )}
+      <div style={{
+        fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#1e1e1e",
+        letterSpacing: 2, marginBottom: 52,
+      }}>
+        NEXT SET INCOMING
+      </div>
+
+      {/* Skip */}
+      <button
+        onClick={onSkip}
+        style={{
+          background: "transparent", color: "#2a2a2a",
+          border: "1px solid #1a1a1a", borderRadius: 14,
+          padding: "16px 56px",
+          fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2,
+          transition: "color 0.2s, border-color 0.2s",
+        }}
+        onMouseEnter={e => { e.target.style.color = "#555"; e.target.style.borderColor = "#333"; }}
+        onMouseLeave={e => { e.target.style.color = "#2a2a2a"; e.target.style.borderColor = "#1a1a1a"; }}
+      >
+        SKIP REST
+      </button>
     </div>
   );
 }
@@ -533,6 +607,8 @@ export default function App() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
         .set-row { transition: background 0.2s; }
         input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
+        .set-circle-done { animation: circlePop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+        @keyframes circlePop { 0%{transform:scale(0.85)} 60%{transform:scale(1.08)} 100%{transform:scale(1)} }
       `}</style>
 
       {/* HEADER */}
@@ -635,6 +711,9 @@ function WorkoutTab({ logs, saveLog }) {
   // Post-workout analysis
   const [analysis, setAnalysis] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  // Session mode
+  const [sessionMode, setSessionMode] = useState(false);
+  const [focusedExIdx, setFocusedExIdx] = useState(0);
 
   const workout = PLAN.workouts[selectedDay];
 
@@ -715,13 +794,20 @@ function WorkoutTab({ logs, saveLog }) {
   };
 
   const markSetDone = (exId, setIdx) => {
+    const wasDone = exerciseData[exId]?.sets[setIdx]?.done;
     setExerciseData(prev => {
       const exSets = [...(prev[exId]?.sets || [])];
-      exSets[setIdx] = { ...exSets[setIdx], done: !exSets[setIdx].done };
+      exSets[setIdx] = { ...exSets[setIdx], done: !wasDone };
+      const allExDone = exSets.every(s => s.done);
+      if (!wasDone) {
+        if (allExDone) haptic.success();
+        else haptic.medium();
+      } else {
+        haptic.light();
+      }
       return { ...prev, [exId]: { ...prev[exId], sets: exSets } };
     });
-    const isDone = !exerciseData[exId]?.sets[setIdx]?.done;
-    if (isDone) setTimer({ restSecs: 90 });
+    if (!wasDone) setTimer({ restSecs: 90 });
     setSaved(false);
   };
 
@@ -909,6 +995,16 @@ Provide a comprehensive post-workout analysis — judge everything through the l
     );
   }
 
+  // Build resolved exercises list (with overrides applied) for session mode
+  const resolvedExercises = workout.exercises.map(ex => {
+    const override = overrides[ex.id];
+    return {
+      planEx: ex,
+      effectiveEx: override || ex,
+      dataKey: override ? override.id : ex.id,
+    };
+  });
+
   return (
     <div className="fade-in">
       {timer && <RestTimer seconds={timer.restSecs} onDone={() => setTimer(null)} onSkip={() => setTimer(null)} />}
@@ -923,100 +1019,414 @@ Provide a comprehensive post-workout analysis — judge everything through the l
         />
       )}
 
-      <div style={{ padding: "16px 16px 0" }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
-          <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} style={{ flex: 1, fontSize: 13, padding: "9px 12px" }} />
-          <button onClick={() => setMode("history")} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, padding: "9px 14px", color: "#555", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1.5, whiteSpace: "nowrap" }}>HISTORY</button>
+      {/* ── SESSION MODE ─────────────────────────────────────────────────────── */}
+      {sessionMode ? (
+        <SessionExerciseView
+          resolvedExercises={resolvedExercises}
+          focusedIdx={focusedExIdx}
+          exerciseData={exerciseData}
+          suggestions={suggestions}
+          workoutColor={workout.color}
+          doneSets={doneSets}
+          totalSets={totalSets}
+          progressPct={progressPct}
+          sessionNotes={sessionNotes}
+          saved={saved}
+          analyzing={analyzing}
+          analysis={analysis}
+          onSessionNotes={v => setSessionNotes(v)}
+          onUpdateSet={(dataKey, si, f, v) => updateSet(dataKey, si, f, v)}
+          onMarkDone={(dataKey, si) => markSetDone(dataKey, si)}
+          onSwap={(exId) => setSwapTarget(exId)}
+          onNext={() => setFocusedExIdx(i => Math.min(i + 1, resolvedExercises.length - 1))}
+          onPrev={() => setFocusedExIdx(i => Math.max(i - 1, 0))}
+          onExit={() => setSessionMode(false)}
+          onSave={handleSave}
+          onAnalyze={analyzeSession}
+        />
+      ) : (
+
+      /* ── LIST MODE (existing) ─────────────────────────────────────────────── */
+      <div>
+        <div style={{ padding: "16px 16px 0" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+            <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} style={{ flex: 1, fontSize: 13, padding: "9px 12px" }} />
+            <button onClick={() => setMode("history")} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, padding: "9px 14px", color: "#555", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1.5, whiteSpace: "nowrap" }}>HISTORY</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
+            {Object.entries(PLAN.workouts).map(([key, wkt]) => {
+              const active = selectedDay === key;
+              return (
+                <button key={key} onClick={() => setSelectedDay(key)} style={{ background: active ? wkt.color : "#0f0f0f", color: active ? "#080808" : "#333", border: `1px solid ${active ? wkt.color : "#1a1a1a"}`, borderRadius: 10, padding: "10px 6px", fontFamily: "'Bebas Neue', sans-serif", fontSize: 17, letterSpacing: 0.5, transition: "all 0.15s" }}>
+                  {wkt.name}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: workout.color, lineHeight: 1 }}>{workout.name}</div>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1.5, marginTop: 3 }}>{workout.sub} · {workout.days}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: progressPct === 100 ? "#c8f060" : "#333" }}>{doneSets}/{totalSets}</div>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1 }}>SETS DONE</div>
+            </div>
+          </div>
+
+          <div style={{ height: 3, background: "#131313", borderRadius: 2, marginBottom: 16, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${progressPct}%`, background: workout.color, borderRadius: 2, transition: "width 0.4s ease" }} />
+          </div>
+
+          {/* START SESSION CTA */}
+          <button
+            onClick={() => { setSessionMode(true); setFocusedExIdx(0); haptic.medium(); }}
+            style={{
+              width: "100%", marginBottom: 10,
+              background: workout.color, color: "#080808",
+              border: "none", borderRadius: 12,
+              padding: "15px",
+              fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            }}
+          >
+            START SESSION
+          </button>
+
+          {Object.keys(suggestions).length === 0 ? (
+            <button onClick={loadSuggestions} disabled={sugLoading} style={{ width: "100%", marginBottom: 14, background: sugLoading ? "#0a0a0a" : "#0d1a05", border: `1px solid ${sugLoading ? "#1a1a1a" : "#1e3310"}`, color: sugLoading ? "#333" : "#c8f060", borderRadius: 10, padding: "11px", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
+              {sugLoading ? <span className="shimmer">LOADING AI TARGETS...</span> : "⚡ GET TODAY'S AI TARGETS"}
+            </button>
+          ) : (
+            <div style={{ background: "#0d1a05", border: "1px solid #1e3310", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 2, color: "#c8f060", marginBottom: 4 }}>AI TARGETS LOADED</div>
+              <div style={{ fontSize: 10, color: "#5a8a30" }}>Suggestions shown inline below each exercise</div>
+            </div>
+          )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
-          {Object.entries(PLAN.workouts).map(([key, wkt]) => {
-            const active = selectedDay === key;
+        <div style={{ padding: "0 16px" }}>
+          {workout.exercises.map((ex, i) => {
+            const override = overrides[ex.id];
+            const effectiveEx = override || ex;
+            const dataKey = override ? override.id : ex.id;
+            const exData = exerciseData[dataKey] || { sets: [] };
+            const allDone = exData.sets.length > 0 && exData.sets.every(s => s.done);
+            const suggestion = suggestions[dataKey];
+
             return (
-              <button key={key} onClick={() => setSelectedDay(key)} style={{ background: active ? wkt.color : "#0f0f0f", color: active ? "#080808" : "#333", border: `1px solid ${active ? wkt.color : "#1a1a1a"}`, borderRadius: 10, padding: "10px 6px", fontFamily: "'Bebas Neue', sans-serif", fontSize: 17, letterSpacing: 0.5, transition: "all 0.15s" }}>
-                {wkt.name}
-              </button>
+              <ExerciseCard
+                key={ex.id}
+                ex={effectiveEx}
+                originalExName={override ? ex.name : null}
+                exData={exData}
+                index={i}
+                suggestion={suggestion}
+                allDone={allDone}
+                workoutColor={workout.color}
+                onUpdateSet={(id, si, f, v) => updateSet(dataKey, si, f, v)}
+                onMarkDone={(id, si) => markSetDone(dataKey, si)}
+                onSwap={() => setSwapTarget(ex.id)}
+                onRestoreOriginal={override ? () => removeOverride(ex.id) : null}
+              />
+            );
+          })}
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#333", marginBottom: 6 }}>SESSION NOTES</div>
+            <textarea placeholder="How'd it feel? Energy, pump, anything unusual..." rows={2} value={sessionNotes} onChange={e => setSessionNotes(e.target.value)} style={{ resize: "none", fontSize: 13, borderRadius: 10 }} />
+          </div>
+
+          <button onClick={handleSave} style={{ width: "100%", background: saved ? "#0d1f05" : workout.color, color: saved ? workout.color : "#080808", border: saved ? `1px solid ${workout.color}33` : "none", padding: "15px", borderRadius: 12, fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 12, transition: "all 0.25s" }}>
+            {saved ? "✓ SESSION SAVED" : "SAVE SESSION"}
+          </button>
+
+          {saved && (
+            <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 24 }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
+              {analysis ? (
+                <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
+              ) : (
+                <button onClick={analyzeSession} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
+                  {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SESSION EXERCISE VIEW ────────────────────────────────────────────────────
+function SessionExerciseView({
+  resolvedExercises, focusedIdx, exerciseData, suggestions, workoutColor,
+  doneSets, totalSets, progressPct,
+  sessionNotes, saved, analyzing, analysis,
+  onSessionNotes, onUpdateSet, onMarkDone, onSwap,
+  onNext, onPrev, onExit, onSave, onAnalyze,
+}) {
+  const { planEx, effectiveEx, dataKey } = resolvedExercises[focusedIdx];
+  const exData = exerciseData[dataKey] || { sets: [] };
+  const setsDoneForEx = exData.sets.filter(s => s.done).length;
+  const allDoneForEx = setsDoneForEx === exData.sets.length && exData.sets.length > 0;
+  const activeSetIdx = exData.sets.findIndex(s => !s.done);
+  const suggestion = suggestions[dataKey];
+  const isBodyweight = effectiveEx.startWeight === 0;
+  const isLast = focusedIdx === resolvedExercises.length - 1;
+  const isFirst = focusedIdx === 0;
+  const allWorkoutDone = doneSets === totalSets && totalSets > 0;
+
+  // Slide-in animation key (changes on exercise change)
+  const [slideKey, setSlideKey] = useState(focusedIdx);
+  useEffect(() => { setSlideKey(focusedIdx); }, [focusedIdx]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 140px)", padding: "0 16px 16px" }}>
+
+      {/* ── Top bar: progress strip + exit ────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 16, marginBottom: 18 }}>
+        {/* Exercise dots */}
+        <div style={{ display: "flex", gap: 5, flex: 1 }}>
+          {resolvedExercises.map((r, i) => {
+            const exD = exerciseData[r.dataKey] || { sets: [] };
+            const done = exD.sets.length > 0 && exD.sets.every(s => s.done);
+            const active = i === focusedIdx;
+            return (
+              <div
+                key={r.planEx.id}
+                style={{
+                  flex: active ? 2 : 1,
+                  height: 3,
+                  borderRadius: 2,
+                  background: done ? workoutColor : active ? `${workoutColor}66` : "#1e1e1e",
+                  transition: "all 0.3s ease",
+                }}
+              />
             );
           })}
         </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: workout.color, lineHeight: 1 }}>{workout.name}</div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1.5, marginTop: 3 }}>{workout.sub} · {workout.days}</div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: progressPct === 100 ? "#c8f060" : "#333" }}>{doneSets}/{totalSets}</div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1 }}>SETS DONE</div>
-          </div>
+        {/* Sets counter */}
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1, whiteSpace: "nowrap" }}>
+          {doneSets}/{totalSets}
         </div>
+        {/* Exit to list */}
+        <button
+          onClick={onExit}
+          style={{ background: "none", color: "#2a2a2a", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1, padding: "4px 0" }}
+        >
+          LIST ↗
+        </button>
+      </div>
 
-        <div style={{ height: 3, background: "#131313", borderRadius: 2, marginBottom: 16, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${progressPct}%`, background: workout.color, borderRadius: 2, transition: "width 0.4s ease" }} />
+      {/* ── Exercise name + meta ───────────────────────────────────────── */}
+      <div key={slideKey} className="fade-in" style={{ marginBottom: 6 }}>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 3,
+          color: workoutColor, marginBottom: 8,
+        }}>
+          {focusedIdx + 1} / {resolvedExercises.length}
         </div>
-
-        {Object.keys(suggestions).length === 0 ? (
-          <button onClick={loadSuggestions} disabled={sugLoading} style={{ width: "100%", marginBottom: 14, background: sugLoading ? "#0a0a0a" : "#0d1a05", border: `1px solid ${sugLoading ? "#1a1a1a" : "#1e3310"}`, color: sugLoading ? "#333" : "#c8f060", borderRadius: 10, padding: "11px", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
-            {sugLoading ? <span className="shimmer">LOADING AI TARGETS...</span> : "⚡ GET TODAY'S AI TARGETS"}
-          </button>
-        ) : (
-          <div style={{ background: "#0d1a05", border: "1px solid #1e3310", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 2, color: "#c8f060", marginBottom: 4 }}>AI TARGETS LOADED</div>
-            <div style={{ fontSize: 10, color: "#5a8a30" }}>Suggestions shown inline below each exercise</div>
+        <div style={{
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: 52,
+          lineHeight: 1,
+          color: allDoneForEx ? "#2a2a2a" : "#ededed",
+          letterSpacing: 0.5,
+          transition: "color 0.4s",
+          marginBottom: 8,
+        }}>
+          {effectiveEx.name}
+        </div>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2a2a2a",
+          letterSpacing: 1.5, marginBottom: 12, lineHeight: 1.7,
+        }}>
+          {effectiveEx.sets} × {effectiveEx.repsMin}{effectiveEx.repsMin !== effectiveEx.repsMax ? `–${effectiveEx.repsMax}` : "s"}{" "}
+          {!isBodyweight && `· ${effectiveEx.note}`}
+        </div>
+        {isBodyweight && (
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2a2a2a", letterSpacing: 1, marginBottom: 12, lineHeight: 1.7 }}>
+            {effectiveEx.note}
           </div>
         )}
       </div>
 
-      <div style={{ padding: "0 16px" }}>
-        {workout.exercises.map((ex, i) => {
-          const override = overrides[ex.id];
-          const effectiveEx = override || ex;
-          const dataKey = override ? override.id : ex.id;
-          const exData = exerciseData[dataKey] || { sets: [] };
-          const allDone = exData.sets.length > 0 && exData.sets.every(s => s.done);
-          const suggestion = suggestions[dataKey];
+      {/* ── AI target ─────────────────────────────────────────────────── */}
+      {suggestion && (
+        <div style={{ background: "#0c1803", border: "1px solid #1a2d08", borderRadius: 10, padding: "10px 12px", marginBottom: 18 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: workoutColor === "#c8f060" ? "#c8f060" : workoutColor, letterSpacing: 1.5, marginBottom: 3 }}>AI TARGET</div>
+          <div style={{ fontSize: 12, color: "#6a9a36", lineHeight: 1.6 }}>{suggestion}</div>
+        </div>
+      )}
 
+      {/* ── Set circles ───────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 24, flexWrap: "wrap" }}>
+        {exData.sets.map((set, si) => {
+          const isDone = set.done;
+          const isActive = si === activeSetIdx;
+          const hasData = set.weight || set.reps;
           return (
-            <ExerciseCard
-              key={ex.id}
-              ex={effectiveEx}
-              originalExName={override ? ex.name : null}
-              exData={exData}
-              index={i}
-              suggestion={suggestion}
-              allDone={allDone}
-              workoutColor={workout.color}
-              onUpdateSet={(id, si, f, v) => updateSet(dataKey, si, f, v)}
-              onMarkDone={(id, si) => markSetDone(dataKey, si)}
-              onSwap={() => setSwapTarget(ex.id)}
-              onRestoreOriginal={override ? () => removeOverride(ex.id) : null}
-            />
+            <button
+              key={si}
+              onClick={() => onMarkDone(dataKey, si)}
+              style={{
+                width: 74, height: 74,
+                borderRadius: "50%",
+                background: isDone
+                  ? workoutColor
+                  : isActive ? "#141414" : "#0d0d0d",
+                border: isDone
+                  ? `2px solid ${workoutColor}`
+                  : isActive
+                  ? `2px solid ${workoutColor}44`
+                  : "2px solid #181818",
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                gap: 3,
+                transition: "all 0.25s ease",
+                boxShadow: isDone
+                  ? `0 0 20px ${workoutColor}28`
+                  : isActive
+                  ? `0 0 14px ${workoutColor}12`
+                  : "none",
+                flexShrink: 0,
+                cursor: "pointer",
+              }}
+            >
+              <span style={{
+                fontFamily: "'Bebas Neue', sans-serif",
+                fontSize: isDone ? 26 : 22,
+                color: isDone ? "#080808" : isActive ? workoutColor : "#252525",
+                lineHeight: 1,
+                transition: "all 0.2s",
+              }}>
+                {isDone ? "✓" : si + 1}
+              </span>
+              {!isDone && hasData && (
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#333", letterSpacing: 0.5, textAlign: "center" }}>
+                  {set.weight || "BW"}{!isBodyweight && "lb"}×{set.reps}
+                </span>
+              )}
+            </button>
           );
         })}
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#333", marginBottom: 6 }}>SESSION NOTES</div>
-          <textarea placeholder="How'd it feel? Energy, pump, anything unusual..." rows={2} value={sessionNotes} onChange={e => setSessionNotes(e.target.value)} style={{ resize: "none", fontSize: 13, borderRadius: 10 }} />
-        </div>
-
-        <button onClick={handleSave} style={{ width: "100%", background: saved ? "#0d1f05" : workout.color, color: saved ? workout.color : "#080808", border: saved ? `1px solid ${workout.color}33` : "none", padding: "15px", borderRadius: 12, fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 12, transition: "all 0.25s" }}>
-          {saved ? "✓ SESSION SAVED" : "SAVE SESSION"}
-        </button>
-
-        {/* POST-WORKOUT ANALYSIS */}
-        {saved && (
-          <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 24 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
-            {analysis ? (
-              <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
-            ) : (
-              <button onClick={analyzeSession} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
-                {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
-              </button>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* ── Weight + reps inputs for active set ───────────────────────── */}
+      {activeSetIdx >= 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+          {!isBodyweight && (
+            <div>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1.5, marginBottom: 6, textAlign: "center" }}>WEIGHT (LBS)</div>
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder={effectiveEx.startWeight > 0 ? String(effectiveEx.startWeight) : "—"}
+                value={exData.sets[activeSetIdx]?.weight || ""}
+                onChange={e => onUpdateSet(dataKey, activeSetIdx, "weight", e.target.value)}
+                style={{ textAlign: "center", fontSize: 26, fontFamily: "'Bebas Neue', sans-serif", padding: "14px 8px", borderRadius: 12, letterSpacing: 1, background: "#0f0f0f", border: "1px solid #1e1e1e" }}
+              />
+            </div>
+          )}
+          <div style={{ gridColumn: isBodyweight ? "1 / -1" : "auto" }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1.5, marginBottom: 6, textAlign: "center" }}>
+              {isBodyweight ? "REPS / SECS" : "REPS"}
+            </div>
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder={`${effectiveEx.repsMin}–${effectiveEx.repsMax}`}
+              value={exData.sets[activeSetIdx]?.reps || ""}
+              onChange={e => onUpdateSet(dataKey, activeSetIdx, "reps", e.target.value)}
+              style={{ textAlign: "center", fontSize: 26, fontFamily: "'Bebas Neue', sans-serif", padding: "14px 8px", borderRadius: 12, letterSpacing: 1, background: "#0f0f0f", border: "1px solid #1e1e1e" }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── All sets done banner ───────────────────────────────────────── */}
+      {allDoneForEx && (
+        <div style={{
+          background: `${workoutColor}0e`,
+          border: `1px solid ${workoutColor}22`,
+          borderRadius: 12, padding: "14px 16px",
+          display: "flex", alignItems: "center", gap: 12,
+          marginBottom: 20,
+        }}>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: workoutColor, lineHeight: 1 }}>DONE</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: `${workoutColor}88`, letterSpacing: 1 }}>
+            {isLast ? "LAST EXERCISE · SAVE BELOW" : "TAP NEXT TO CONTINUE"}
+          </div>
+        </div>
+      )}
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* ── Nav buttons ───────────────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        <button
+          onClick={() => { onPrev(); haptic.light(); }}
+          disabled={isFirst}
+          style={{
+            background: "transparent",
+            color: isFirst ? "#181818" : "#333",
+            border: `1px solid ${isFirst ? "#111" : "#1e1e1e"}`,
+            borderRadius: 12, padding: "14px",
+            fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2,
+            transition: "all 0.15s",
+          }}
+        >
+          ← PREV
+        </button>
+        <button
+          onClick={() => { isLast ? onSave() : (onNext(), haptic.light()); }}
+          style={{
+            background: isLast ? (saved ? "#0d1f05" : workoutColor) : workoutColor,
+            color: isLast ? (saved ? workoutColor : "#080808") : "#080808",
+            border: isLast && saved ? `1px solid ${workoutColor}33` : "none",
+            borderRadius: 12, padding: "14px",
+            fontFamily: isLast ? "'Bebas Neue', sans-serif" : "'DM Mono', monospace",
+            fontSize: isLast ? 20 : 10,
+            letterSpacing: isLast ? 1 : 2,
+            transition: "all 0.25s",
+          }}
+        >
+          {isLast ? (saved ? "✓ SAVED" : "SAVE SESSION") : "NEXT →"}
+        </button>
+      </div>
+
+      {/* ── Session notes + post-workout analysis (last exercise) ─────── */}
+      {isLast && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 2, marginBottom: 6 }}>SESSION NOTES</div>
+          <textarea
+            placeholder="Energy, pump, anything unusual..."
+            rows={2}
+            value={sessionNotes}
+            onChange={e => onSessionNotes(e.target.value)}
+            style={{ resize: "none", fontSize: 13, borderRadius: 10 }}
+          />
+        </div>
+      )}
+
+      {isLast && saved && (
+        <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 8 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
+          {analysis ? (
+            <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
+          ) : (
+            <button onClick={onAnalyze} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
+              {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
