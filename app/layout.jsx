@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Banjo Fitness OS",
-  description: "Personal gym tracker — PPL cut",
+  description: "Personal PPL cut tracker",
 };
 
 export const viewport = {
@@ -8,6 +8,7 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }) {
@@ -18,7 +19,9 @@ export default function RootLayout({ children }) {
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Fitness OS" />
+        <meta name="apple-mobile-web-app-title" content="BANJO" />
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/icon-180.png" />
       </head>
       <body style={{ margin: 0, padding: 0, background: "#080808" }}>
         {children}
