@@ -548,9 +548,68 @@ function RestTimer({ seconds, onDone, onSkip, nextSetHint }) {
   );
 }
 
+// ─── NAV ICONS (SVG) ─────────────────────────────────────────────────────────
+const IcoHome = ({ active }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <path d="M12 3.5L4 9.5V21h5.5v-5.5h5V21H20V9.5L12 3.5z" fill={active ? "#ffffff" : "#6a6a6a"} />
+    {active && <path d="M12 3.5L4 9.5V21h5.5v-5.5h5V21H20V9.5L12 3.5z" fill="#ffffff" opacity="0.15" />}
+  </svg>
+);
+const IcoTrain = ({ active }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <rect x="2" y="11" width="4" height="2" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="18" y="11" width="4" height="2" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="6" y="8" width="12" height="8" rx="2" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="9" y="5" width="2" height="4" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="13" y="5" width="2" height="4" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="9" y="15" width="2" height="4" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="13" y="15" width="2" height="4" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+  </svg>
+);
+const IcoLibrary = ({ active }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="2" height="16" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="7" y="6" width="2" height="14" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="11" y="4" width="10" height="3" rx="1.5" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="11" y="9" width="10" height="3" rx="1.5" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="11" y="14" width="10" height="3" rx="1.5" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="11" y="19" width="10" height="1" rx="0.5" fill={active ? "#ffffff" : "#6a6a6a"} />
+  </svg>
+);
+const IcoStats = ({ active }) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="14" width="4" height="7" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="10" y="9" width="4" height="12" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+    <rect x="17" y="4" width="4" height="17" rx="1" fill={active ? "#ffffff" : "#6a6a6a"} />
+  </svg>
+);
+
+// ─── WORKOUT COVER ART ────────────────────────────────────────────────────────
+const COVERS = {
+  D1: {
+    gradient: "linear-gradient(145deg, #ff6b2b 0%, #c8390a 40%, #5a1400 100%)",
+    pattern: "M0 0 L60 0 L60 60 L0 60Z M20 20 L40 0 L60 20 L40 40Z",
+    label: "PUSH",
+    accent: "#ff6b2b",
+  },
+  D2: {
+    gradient: "linear-gradient(145deg, #2b7fff 0%, #0a39c8 40%, #00145a 100%)",
+    pattern: "M0 30 A30 30 0 1 1 60 30 A30 30 0 1 1 0 30Z",
+    label: "PULL",
+    accent: "#4d9fff",
+  },
+  D3: {
+    gradient: "linear-gradient(145deg, #ffb72b 0%, #c87a0a 40%, #5a3000 100%)",
+    pattern: "M30 5 L55 50 L5 50Z",
+    label: "LEGS",
+    accent: "#ffb72b",
+  },
+};
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState("workout");
+  const [tab, setTab] = useState("home");
+  const [trainDay, setTrainDay] = useState(null); // lifted so Library can navigate to Train
   const [logs, setLogs] = useState(() => store.get("logs") || {});
   const [nutrition, setNutrition] = useState(() => store.get("nutrition") || {});
   const [sleep, setSleep] = useState(() => store.get("sleep") || {});
@@ -588,109 +647,91 @@ export default function App() {
     localStorage.setItem("banjo_api_key", k);
   };
 
+  // Navigate to Train tab with a pre-selected program day
+  const goTrain = (day) => {
+    setTrainDay(day);
+    setTab("train");
+  };
 
-  const tabs = [
-    { id: "today",   label: "TODAY",   icon: "◈" },
-    { id: "workout", label: "TRAIN",   icon: "⬡" },
-    { id: "nutrition", label: "FOOD",  icon: "◇" },
-    { id: "progress", label: "STATS",  icon: "◉" },
-    { id: "plan",    label: "PLAN",    icon: "≡" },
+  const NAV = [
+    { id: "home",    label: "Home",    Icon: IcoHome },
+    { id: "train",   label: "Train",   Icon: IcoTrain },
+    { id: "library", label: "Library", Icon: IcoLibrary },
+    { id: "stats",   label: "Stats",   Icon: IcoStats },
   ];
 
   return (
-    <div style={{ background: "#080808", minHeight: "100vh", color: "#e2e2e2", fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 300, maxWidth: 480, margin: "0 auto" }}>
+    <div style={{ background: "#121212", minHeight: "100vh", color: "#ffffff", fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 400, maxWidth: 480, margin: "0 auto" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        input, textarea, select { background: #111; border: 1px solid #222; color: #e2e2e2; border-radius: 8px; font-family: inherit; font-size: 15px; padding: 10px 12px; width: 100%; outline: none; -webkit-appearance: none; }
-        input:focus, textarea:focus, select:focus { border-color: #c8f060; box-shadow: 0 0 0 2px rgba(200,240,96,0.08); }
+        input, textarea, select { background: #2a2a2a; border: none; color: #ffffff; border-radius: 8px; font-family: inherit; font-size: 15px; padding: 10px 12px; width: 100%; outline: none; -webkit-appearance: none; box-shadow: rgb(18,18,18) 0px 1px 0px, rgb(90,90,90) 0px 0px 0px 1px inset; }
+        input:focus, textarea:focus, select:focus { box-shadow: rgb(18,18,18) 0px 1px 0px, rgb(200,240,96) 0px 0px 0px 2px inset; }
         button { cursor: pointer; border: none; outline: none; font-family: inherit; -webkit-tap-highlight-color: transparent; }
         ::-webkit-scrollbar { width: 0; height: 0; }
-        .fade-in { animation: fadeIn 0.25s ease; }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        .fade-in { animation: fadeIn 0.22s ease; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         .shimmer { animation: pulse 1.2s ease-in-out infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        .set-row { transition: background 0.2s; }
         input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
         .set-circle-done { animation: circlePop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
         @keyframes circlePop { 0%{transform:scale(0.85)} 60%{transform:scale(1.08)} 100%{transform:scale(1)} }
+        .sp-card:hover { background: #282828 !important; }
+        .sp-pill-active { background: #ffffff !important; color: #000000 !important; }
       `}</style>
 
-      {/* HEADER */}
-      <div style={{ padding: "18px 16px 12px", borderBottom: "1px solid #131313", display: "flex", justifyContent: "space-between", alignItems: "flex-end", position: "sticky", top: 0, background: "#080808", zIndex: 50 }}>
-        <div>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 3, color: "#c8f060", marginBottom: 3 }}>BANJO · PPL CUT</div>
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, letterSpacing: 1, lineHeight: 1 }}>FITNESS OS</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: "#c8f060", lineHeight: 1 }}>{daysUntil(PLAN.targetDate)}</div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1, color: "#333" }}>DAYS LEFT</div>
-          </div>
-          <button onClick={() => setShowSettings(!showSettings)} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, width: 36, height: 36, color: "#444", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>⚙</button>
-        </div>
-      </div>
-
-      {/* SETTINGS PANEL */}
+      {/* SETTINGS DRAWER */}
       {showSettings && (
-        <div className="fade-in" style={{ background: "#0d0d0d", borderBottom: "1px solid #1a1a1a", padding: "14px 16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#444" }}>SETTINGS</div>
-            <button onClick={() => setShowSettings(false)} style={{ background: "#c8f060", color: "#080808", padding: "5px 14px", borderRadius: 8, fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 1 }}>DONE</button>
-          </div>
-
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 5 }}>ANTHROPIC API KEY</div>
-          <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => saveApiKey(e.target.value)} style={{ marginBottom: 10, fontSize: 13 }} />
-
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5, color: "#333", marginBottom: 8 }}>OURA RING</div>
-          {ouraConnected ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#08100a", border: "1px solid #1a3a22", borderRadius: 10, padding: "10px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#4a9a5a" }} />
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#4a9a5a", letterSpacing: 1 }}>CONNECTED</span>
-              </div>
-              <button onClick={() => { disconnectOura(); setOuraConnected(false); }} style={{ background: "none", color: "#444", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1 }}>DISCONNECT</button>
+        <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end" }} onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
+          <div style={{ background: "#181818", borderRadius: "20px 20px 0 0", padding: "20px 20px 48px", width: "100%", maxWidth: 480, margin: "0 auto", boxShadow: "rgba(0,0,0,0.5) 0px -8px 24px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <span style={{ fontWeight: 700, fontSize: 18 }}>Settings</span>
+              <button onClick={() => setShowSettings(false)} style={{ background: "#2a2a2a", color: "#b3b3b3", borderRadius: "50%", width: 32, height: 32, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
             </div>
-          ) : (
-            <button onClick={connectOura} style={{ width: "100%", background: "#08100a", border: "1px solid #1a3a22", borderRadius: 10, padding: "12px", color: "#4a9a5a", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
-              CONNECT OURA RING →
-            </button>
-          )}
-          <div style={{ fontSize: 10, color: "#2a2a2a", marginTop: 6 }}>Syncs sleep, HRV, steps, and readiness to the TODAY tab.</div>
+            <div style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Anthropic API Key</div>
+            <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => saveApiKey(e.target.value)} style={{ marginBottom: 16, fontSize: 13 }} />
+            <div style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Oura Ring</div>
+            {ouraConnected ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1a2a1a", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1ed760" }} />
+                  <span style={{ fontSize: 13, color: "#1ed760" }}>Connected</span>
+                </div>
+                <button onClick={() => { disconnectOura(); setOuraConnected(false); }} style={{ background: "none", color: "#b3b3b3", fontSize: 12 }}>Disconnect</button>
+              </div>
+            ) : (
+              <button onClick={connectOura} style={{ width: "100%", background: "#1a2a1a", borderRadius: 12, padding: "13px", color: "#1ed760", fontSize: 13, fontWeight: 700 }}>
+                Connect Oura Ring →
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* PHASE BAR */}
-      <div style={{ padding: "6px 16px", background: "#0d0d0d", borderBottom: "1px solid #131313", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div style={{ width: 5, height: 5, borderRadius: "50%", background: currentPhase().color }} />
-          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 2, color: currentPhase().color }}>WK {weekNum()} · {currentPhase().name}</span>
-        </div>
-        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1 }}>TARGET MAY 15</span>
-      </div>
-
       {/* CONTENT */}
-      <div style={{ paddingBottom: 72 }}>
-        {tab === "today"     && <TodayTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} saveBW={saveBW} saveSleep={saveSleep} setTab={setTab} />}
-        {tab === "workout"   && <WorkoutTab logs={logs} saveLog={saveLog} />}
-        {tab === "nutrition" && <NutritionTab nutrition={nutrition} saveNutrition={saveNutrition} />}
-        {tab === "progress"  && <ProgressTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} />}
-        {tab === "plan"      && <PlanTab />}
+      <div style={{ paddingBottom: 80 }}>
+        {tab === "home"    && <HomeTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} saveBW={saveBW} saveSleep={saveSleep} saveNutrition={saveNutrition} goTrain={goTrain} onSettings={() => setShowSettings(true)} />}
+        {tab === "train"   && <WorkoutTab logs={logs} saveLog={saveLog} initialDay={trainDay} />}
+        {tab === "library" && <LibraryTab logs={logs} goTrain={goTrain} />}
+        {tab === "stats"   && <ProgressTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} />}
       </div>
 
-      {/* BOTTOM NAV */}
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(8,8,8,0.96)", borderTop: "1px solid #151515", display: "flex", zIndex: 100, backdropFilter: "blur(10px)" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            flex: 1, padding: "10px 4px 8px",
-            background: "none",
-            color: tab === t.id ? "#c8f060" : "#2a2a2a",
-            borderTop: `2px solid ${tab === t.id ? "#c8f060" : "transparent"}`,
-            transition: "all 0.15s",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-          }}>
-            <span style={{ fontSize: 14 }}>{t.icon}</span>
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5 }}>{t.label}</span>
+      {/* BOTTOM NAV — Spotify style */}
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(18,18,18,0.97)", borderTop: "1px solid #282828", display: "flex", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {NAV.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            style={{
+              flex: 1, padding: "10px 0 8px",
+              background: "none",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              color: tab === id ? "#ffffff" : "#6a6a6a",
+              transition: "color 0.15s",
+            }}
+          >
+            <Icon active={tab === id} />
+            <span style={{ fontSize: 10, fontWeight: tab === id ? 700 : 400, letterSpacing: 0.2 }}>{label}</span>
           </button>
         ))}
       </div>
@@ -698,10 +739,480 @@ export default function App() {
   );
 }
 
+// ─── HOME TAB ─────────────────────────────────────────────────────────────────
+function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNutrition, goTrain, onSettings }) {
+  const d = today();
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const todayWorkout = getDefaultWorkout();
+  const todayCover = COVERS[todayWorkout];
+  const workout = PLAN.workouts[todayWorkout];
+  const todayLog = logs[d]?.[todayWorkout];
+  const todayNutrition = nutrition[d] || {};
+  const lastBW = Object.entries(bodyweight).sort((a,b)=>b[0].localeCompare(a[0]))[0];
+  const todaySleep = sleep[d];
+  const phase = currentPhase();
+  const days = daysUntil(PLAN.targetDate);
+
+  // Compute today's workout progress
+  const totalSetsToday = todayLog
+    ? Object.values(todayLog).reduce((s, ex) => s + (Array.isArray(ex?.sets) ? ex.sets.length : 0), 0)
+    : 0;
+  const doneSetsToday = todayLog
+    ? Object.values(todayLog).reduce((s, ex) => s + (Array.isArray(ex?.sets) ? ex.sets.filter(set => set.done).length : 0), 0)
+    : 0;
+  const workoutStarted = doneSetsToday > 0;
+  const workoutDone = totalSetsToday > 0 && doneSetsToday === totalSetsToday;
+
+  // Recent sessions (last 5 logged workouts)
+  const recentSessions = Object.entries(logs)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 5)
+    .map(([date, dayData]) => {
+      const dayKey = Object.keys(dayData || {}).find(k => k !== "_notes");
+      if (!dayKey || !PLAN.workouts[dayKey]) return null;
+      const wkt = PLAN.workouts[dayKey];
+      const data = dayData[dayKey] || {};
+      const done = Object.values(data).filter(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done)).length;
+      return { date, dayKey, wkt, done };
+    })
+    .filter(Boolean);
+
+  // Inline food quick-add state
+  const [showFood, setShowFood] = useState(false);
+  const [foodForm, setFoodForm] = useState({ calories: "", protein: "" });
+  const addMeals = () => {
+    if (!foodForm.calories && !foodForm.protein) return;
+    const prev = nutrition[d] || {};
+    const next = { calories: (prev.calories || 0) + (parseInt(foodForm.calories) || 0), protein: (prev.protein || 0) + (parseInt(foodForm.protein) || 0), drinkDay: prev.drinkDay || false };
+    saveNutrition(d, next);
+    setFoodForm({ calories: "", protein: "" });
+    setShowFood(false);
+  };
+
+  const [bwInput, setBwInput] = useState("");
+
+  return (
+    <div className="fade-in" style={{ padding: "0 0 16px" }}>
+
+      {/* ── TOP BAR ─────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 16px 0" }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{greeting}, Banjo</div>
+          <div style={{ fontSize: 12, color: "#b3b3b3", marginTop: 2 }}>Wk {weekNum()} · {phase.name} · {days}d left</div>
+        </div>
+        <button onClick={onSettings} style={{ background: "#282828", borderRadius: "50%", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#b3b3b3" }}>⚙</button>
+      </div>
+
+      {/* ── TODAY'S WORKOUT CARD (album cover) ──────────────────────── */}
+      <div style={{ padding: "20px 16px 0" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>Today's Workout</div>
+        <button
+          onClick={() => goTrain(todayWorkout)}
+          style={{
+            width: "100%", background: "#181818", borderRadius: 12,
+            overflow: "hidden", textAlign: "left",
+            display: "flex", alignItems: "center", gap: 16, padding: 12,
+            boxShadow: "rgba(0,0,0,0.3) 0px 8px 16px",
+            transition: "background 0.2s",
+          }}
+        >
+          {/* Album cover art */}
+          <div style={{
+            width: 80, height: 80, borderRadius: 8, flexShrink: 0,
+            background: todayCover.gradient,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: `0 4px 20px ${todayCover.accent}40`,
+            position: "relative", overflow: "hidden",
+          }}>
+            <svg width="80" height="80" viewBox="0 0 80 80" style={{ position: "absolute", inset: 0, opacity: 0.12 }}>
+              <circle cx="40" cy="40" r="35" fill="none" stroke="white" strokeWidth="2" />
+              <circle cx="40" cy="40" r="20" fill="none" stroke="white" strokeWidth="1.5" />
+              <circle cx="40" cy="40" r="5" fill="white" />
+            </svg>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "rgba(255,255,255,0.95)", letterSpacing: 2, position: "relative", zIndex: 1 }}>
+              {todayCover.label}
+            </div>
+          </div>
+          {/* Text */}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 3 }}>{workout.name}</div>
+            <div style={{ fontSize: 12, color: "#b3b3b3", marginBottom: 6 }}>{workout.exercises.length} exercises · PPL Split</div>
+            {workoutStarted && !workoutDone && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ height: 3, flex: 1, background: "#282828", borderRadius: 9999 }}>
+                  <div style={{ height: "100%", width: `${totalSetsToday > 0 ? (doneSetsToday/totalSetsToday)*100 : 0}%`, background: todayCover.accent, borderRadius: 9999, transition: "width 0.4s" }} />
+                </div>
+                <span style={{ fontSize: 10, color: "#b3b3b3", whiteSpace: "nowrap" }}>{doneSetsToday}/{totalSetsToday}</span>
+              </div>
+            )}
+            {workoutDone && <div style={{ fontSize: 11, color: "#1ed760", fontWeight: 700 }}>✓ Completed</div>}
+            {!workoutStarted && <div style={{ fontSize: 11, color: "#b3b3b3" }}>Tap to start session</div>}
+          </div>
+          {/* Play button */}
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%",
+            background: todayCover.accent, flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: `0 4px 16px ${todayCover.accent}66`,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 2.5L13.5 8L3 13.5V2.5Z" fill="#000000" />
+            </svg>
+          </div>
+        </button>
+      </div>
+
+      {/* ── QUICK STATS ROW ─────────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "16px 16px 0" }}>
+        {/* Calories */}
+        <div style={{ background: "#181818", borderRadius: 10, padding: "12px 10px" }}>
+          <div style={{ fontSize: 10, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Cals</div>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: "#ffffff", lineHeight: 1 }}>
+            {todayNutrition.calories || 0}
+          </div>
+          <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 2 }}>/ {todayNutrition.drinkDay ? 1350 : PLAN.dailyCalories}</div>
+        </div>
+        {/* Protein */}
+        <div style={{ background: "#181818", borderRadius: 10, padding: "12px 10px" }}>
+          <div style={{ fontSize: 10, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Protein</div>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: "#ffffff", lineHeight: 1 }}>
+            {todayNutrition.protein || 0}<span style={{ fontSize: 12, color: "#b3b3b3" }}>g</span>
+          </div>
+          <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 2 }}>/ {PLAN.dailyProtein}g</div>
+        </div>
+        {/* Bodyweight */}
+        <div style={{ background: "#181818", borderRadius: 10, padding: "12px 10px" }}>
+          <div style={{ fontSize: 10, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Weight</div>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: "#ffffff", lineHeight: 1 }}>
+            {lastBW ? lastBW[1] : "—"}<span style={{ fontSize: 12, color: "#b3b3b3" }}>lb</span>
+          </div>
+          <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 2 }}>goal {PLAN.targetWeight}lb</div>
+        </div>
+      </div>
+
+      {/* ── QUICK ADD (food + bodyweight) ────────────────────────────── */}
+      <div style={{ display: "flex", gap: 8, padding: "10px 16px 0" }}>
+        <button
+          onClick={() => setShowFood(!showFood)}
+          style={{ flex: 1, background: "#1ed76018", border: "1px solid #1ed76030", borderRadius: 9999, padding: "8px 14px", color: "#1ed760", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}
+        >
+          + Log Food
+        </button>
+        <button
+          onClick={() => {
+            const v = prompt("Bodyweight (lbs)?");
+            if (v && !isNaN(parseFloat(v))) saveBW(d, parseFloat(v));
+          }}
+          style={{ flex: 1, background: "#ffffff18", border: "1px solid #ffffff20", borderRadius: 9999, padding: "8px 14px", color: "#b3b3b3", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}
+        >
+          + Log Weight
+        </button>
+      </div>
+      {showFood && (
+        <div className="fade-in" style={{ margin: "10px 16px 0", background: "#181818", borderRadius: 12, padding: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#b3b3b3", marginBottom: 4 }}>Calories</div>
+              <input type="number" inputMode="numeric" placeholder="0" value={foodForm.calories} onChange={e => setFoodForm(f => ({...f, calories: e.target.value}))} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#b3b3b3", marginBottom: 4 }}>Protein (g)</div>
+              <input type="number" inputMode="numeric" placeholder="0" value={foodForm.protein} onChange={e => setFoodForm(f => ({...f, protein: e.target.value}))} />
+            </div>
+          </div>
+          <button onClick={addMeals} style={{ width: "100%", background: "#1ed760", color: "#000", borderRadius: 9999, padding: "10px", fontWeight: 700, fontSize: 13 }}>Add</button>
+        </div>
+      )}
+
+      {/* ── RECENT SESSIONS ─────────────────────────────────────────── */}
+      {recentSessions.length > 0 && (
+        <div style={{ padding: "20px 16px 0" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>Jump Back In</div>
+          <div style={{ display: "flex", gap: 10, overflowX: "auto", scrollbarWidth: "none" }}>
+            {recentSessions.map(({ date, dayKey, wkt, done }) => {
+              const cover = COVERS[dayKey] || COVERS.D1;
+              return (
+                <button
+                  key={date}
+                  onClick={() => goTrain(dayKey)}
+                  style={{ flexShrink: 0, background: "#181818", borderRadius: 10, padding: "10px", textAlign: "left", width: 120, transition: "background 0.15s" }}
+                >
+                  <div style={{ width: "100%", aspectRatio: "1", borderRadius: 6, background: cover.gradient, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
+                    <svg width="100%" height="100%" viewBox="0 0 60 60" style={{ position: "absolute", inset: 0, opacity: 0.1 }}>
+                      <circle cx="30" cy="30" r="26" fill="none" stroke="white" strokeWidth="2" />
+                      <circle cx="30" cy="30" r="12" fill="none" stroke="white" strokeWidth="1.5" />
+                    </svg>
+                    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: "rgba(255,255,255,0.9)", letterSpacing: 1 }}>{cover.label}</div>
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wkt.name}</div>
+                  <div style={{ fontSize: 10, color: "#b3b3b3" }}>{date.slice(5)}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── PHASE PROGRESS ──────────────────────────────────────────── */}
+      <div style={{ margin: "20px 16px 0", background: "#181818", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{phase.name}</div>
+            <div style={{ fontSize: 11, color: "#b3b3b3" }}>Week {weekNum()} · {days} days to cut end</div>
+          </div>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, color: phase.color, lineHeight: 1 }}>{days}</div>
+        </div>
+        <div style={{ height: 4, background: "#282828", borderRadius: 9999 }}>
+          <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, 100 - (days / 49) * 100))}%`, background: phase.color, borderRadius: 9999, transition: "width 0.4s" }} />
+        </div>
+        <div style={{ fontSize: 10, color: "#6a6a6a", marginTop: 6 }}>Target: {PLAN.targetWeight}lb at {PLAN.targetBF}% BF by May 15</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LIBRARY TAB ──────────────────────────────────────────────────────────────
+function LibraryTab({ logs, goTrain }) {
+  const [filter, setFilter] = useState("programs"); // "programs" | "exercises"
+  const [selectedEx, setSelectedEx] = useState(null); // exercise name for history modal
+
+  // Build exercise history index from all logs
+  const exerciseHistory = {};
+  Object.entries(logs).forEach(([date, dayData]) => {
+    Object.entries(dayData || {}).forEach(([wktKey, wktData]) => {
+      if (!PLAN.workouts[wktKey]) return;
+      PLAN.workouts[wktKey].exercises.forEach(ex => {
+        const data = wktData[ex.id];
+        if (!data?.sets) return;
+        if (!exerciseHistory[ex.name]) exerciseHistory[ex.name] = { ex, sessions: [] };
+        const doneSets = data.sets.filter(s => s.done);
+        if (doneSets.length > 0) {
+          exerciseHistory[ex.name].sessions.push({ date, sets: doneSets });
+        }
+      });
+    });
+  });
+  const exerciseList = Object.entries(exerciseHistory)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  return (
+    <div className="fade-in" style={{ padding: "20px 0 16px" }}>
+
+      {/* ── HEADER ───────────────────────────────────────────────────── */}
+      <div style={{ padding: "0 16px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>Your Library</div>
+      </div>
+
+      {/* ── FILTER PILLS ─────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 8, padding: "0 16px 16px", overflowX: "auto", scrollbarWidth: "none" }}>
+        {["programs", "exercises"].map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            style={{
+              flexShrink: 0,
+              background: filter === f ? "#ffffff" : "#282828",
+              color: filter === f ? "#000000" : "#ffffff",
+              borderRadius: 9999, padding: "6px 16px",
+              fontSize: 13, fontWeight: 700,
+              transition: "all 0.15s",
+            }}
+          >
+            {f.charAt(0).toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* ── PROGRAMS VIEW ────────────────────────────────────────────── */}
+      {filter === "programs" && (
+        <div style={{ padding: "0 16px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>Active Program</div>
+          {Object.entries(PLAN.workouts).map(([dayKey, wkt]) => {
+            const cover = COVERS[dayKey];
+            const totalSets = wkt.exercises.reduce((s, ex) => s + ex.sets, 0);
+            // Recent sessions for this day
+            const recentForDay = Object.entries(logs)
+              .filter(([, d]) => d[dayKey])
+              .sort((a, b) => b[0].localeCompare(a[0]))
+              .slice(0, 3);
+            return (
+              <button
+                key={dayKey}
+                onClick={() => goTrain(dayKey)}
+                className="sp-card"
+                style={{
+                  width: "100%", background: "#181818", borderRadius: 12,
+                  padding: 12, marginBottom: 10, display: "flex",
+                  alignItems: "center", gap: 14, transition: "background 0.15s",
+                  textAlign: "left",
+                  boxShadow: "rgba(0,0,0,0.3) 0px 4px 12px",
+                }}
+              >
+                {/* Album cover */}
+                <div style={{
+                  width: 72, height: 72, borderRadius: 8, flexShrink: 0,
+                  background: cover.gradient,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  position: "relative", overflow: "hidden",
+                  boxShadow: `0 4px 16px ${cover.accent}44`,
+                }}>
+                  <svg width="72" height="72" viewBox="0 0 72 72" style={{ position: "absolute", inset: 0, opacity: 0.12 }}>
+                    <circle cx="36" cy="36" r="30" fill="none" stroke="white" strokeWidth="2" />
+                    <circle cx="36" cy="36" r="16" fill="none" stroke="white" strokeWidth="1.5" />
+                    <circle cx="36" cy="36" r="4" fill="white" />
+                  </svg>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, color: "rgba(255,255,255,0.95)", letterSpacing: 2, position: "relative", zIndex: 1 }}>
+                    {cover.label}
+                  </div>
+                </div>
+                {/* Info */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 3 }}>{wkt.name}</div>
+                  <div style={{ fontSize: 12, color: "#b3b3b3", marginBottom: 4 }}>{wkt.exercises.length} exercises · {totalSets} sets</div>
+                  {recentForDay.length > 0 && (
+                    <div style={{ fontSize: 10, color: "#6a6a6a" }}>Last session: {recentForDay[0][0]}</div>
+                  )}
+                </div>
+                {/* Play circle */}
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: cover.accent, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 4px 12px ${cover.accent}55` }}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2.5 2L11.5 7L2.5 12V2Z" fill="#000000" />
+                  </svg>
+                </div>
+              </button>
+            );
+          })}
+
+          {/* Exercise list inside this program */}
+          {Object.entries(PLAN.workouts).map(([dayKey, wkt]) => {
+            const cover = COVERS[dayKey];
+            return (
+              <div key={`exlist-${dayKey}`} style={{ marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: cover.accent }} />
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase" }}>{cover.label} Exercises</div>
+                </div>
+                {wkt.exercises.map((ex, idx) => {
+                  const history = exerciseHistory[ex.name];
+                  const lastSession = history?.sessions.sort((a,b)=>b.date.localeCompare(a.date))[0];
+                  const lastWeight = lastSession?.sets.filter(s=>s.weight).slice(-1)[0]?.weight;
+                  return (
+                    <button
+                      key={ex.id}
+                      onClick={() => setSelectedEx(ex.name)}
+                      className="sp-card"
+                      style={{
+                        width: "100%", background: "transparent", borderRadius: 8,
+                        padding: "10px 0", display: "flex", alignItems: "center", gap: 12,
+                        borderBottom: "1px solid #282828", transition: "background 0.1s",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div style={{ width: 36, height: 36, borderRadius: 4, background: `${cover.accent}22`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Bebas Neue', sans-serif", fontSize: 14, color: cover.accent, flexShrink: 0 }}>
+                        {idx + 1}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{ex.name}</div>
+                        <div style={{ fontSize: 11, color: "#b3b3b3" }}>{ex.sets} × {ex.repsMin}{ex.repsMin !== ex.repsMax ? `–${ex.repsMax}` : ""}</div>
+                      </div>
+                      {lastWeight && (
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, color: cover.accent }}>{lastWeight}</div>
+                          <div style={{ fontSize: 9, color: "#6a6a6a" }}>lb last</div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── EXERCISES VIEW (liked songs) ─────────────────────────────── */}
+      {filter === "exercises" && (
+        <div style={{ padding: "0 16px" }}>
+          {exerciseList.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#6a6a6a", padding: "60px 0" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>💪</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>No exercises logged yet</div>
+              <div style={{ fontSize: 13, color: "#b3b3b3" }}>Start a workout to see your history here</div>
+            </div>
+          ) : (
+            exerciseList.map(([name, { ex, sessions }]) => {
+              const sorted = sessions.sort((a,b)=>b.date.localeCompare(a.date));
+              const last = sorted[0];
+              const lastWeight = last?.sets.filter(s=>s.weight).slice(-1)[0]?.weight;
+              const lastReps = last?.sets.filter(s=>s.reps).slice(-1)[0]?.reps;
+              return (
+                <button
+                  key={name}
+                  onClick={() => setSelectedEx(name)}
+                  className="sp-card"
+                  style={{
+                    width: "100%", background: "transparent", padding: "10px 0",
+                    display: "flex", alignItems: "center", gap: 12,
+                    borderBottom: "1px solid #282828", textAlign: "left", transition: "background 0.1s",
+                  }}
+                >
+                  <div style={{ width: 44, height: 44, borderRadius: 6, background: "#282828", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>💪</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#b3b3b3" }}>{sessions.length} session{sessions.length !== 1 ? "s" : ""} logged</div>
+                  </div>
+                  {lastWeight && (
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#ffffff" }}>{lastWeight}×{lastReps}</div>
+                      <div style={{ fontSize: 9, color: "#6a6a6a" }}>last</div>
+                    </div>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* ── EXERCISE HISTORY MODAL ───────────────────────────────────── */}
+      {selectedEx && (() => {
+        const history = exerciseHistory[selectedEx];
+        if (!history) return null;
+        const sorted = (history.sessions || []).sort((a,b)=>b.date.localeCompare(a.date));
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end" }} onClick={e => { if (e.target === e.currentTarget) setSelectedEx(null); }}>
+            <div style={{ background: "#181818", borderRadius: "20px 20px 0 0", padding: "20px 20px 48px", width: "100%", maxWidth: 480, margin: "0 auto", maxHeight: "75vh", overflowY: "auto", boxShadow: "rgba(0,0,0,0.5) 0px -8px 24px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 18 }}>{selectedEx}</div>
+                <button onClick={() => setSelectedEx(null)} style={{ background: "#282828", borderRadius: "50%", width: 32, height: 32, color: "#b3b3b3", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>{sorted.length} Sessions</div>
+              {sorted.map(({ date, sets }) => (
+                <div key={date} style={{ background: "#282828", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: "#b3b3b3", marginBottom: 8, fontWeight: 700 }}>{date}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {sets.map((s, i) => (
+                      <div key={i} style={{ background: "#383838", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 1 }}>
+                        {s.weight ? `${s.weight}×${s.reps}` : `${s.reps} reps`}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+    </div>
+  );
+}
+
 // ─── WORKOUT TAB ─────────────────────────────────────────────────────────────
-function WorkoutTab({ logs, saveLog }) {
+function WorkoutTab({ logs, saveLog, initialDay }) {
   const [mode, setMode] = useState("live");
-  const [selectedDay, setSelectedDay] = useState(getDefaultWorkout());
+  const [selectedDay, setSelectedDay] = useState(initialDay || getDefaultWorkout());
   const [logDate, setLogDate] = useState(today());
   const [exerciseData, setExerciseData] = useState({});
   const [saved, setSaved] = useState(false);
@@ -756,10 +1267,31 @@ function WorkoutTab({ logs, saveLog }) {
     setAnalysis("");
   }, [selectedDay, logDate, logs]);
 
+  // Project weight for an exercise based on recent history + progressive overload
+  function projectWeight(exId, ex, dayKey) {
+    const sessions = Object.entries(logs)
+      .sort((a, b) => b[0].localeCompare(a[0])) // newest first
+      .map(([date, dayData]) => dayData?.[dayKey]?.[exId])
+      .filter(d => d?.sets?.some(s => s.done));
+    if (sessions.length === 0) return ex.startWeight > 0 ? String(ex.startWeight) : "";
+    const lastSets = sessions[0].sets.filter(s => s.done && s.weight);
+    if (lastSets.length === 0) return ex.startWeight > 0 ? String(ex.startWeight) : "";
+    const lastWeight = parseFloat(lastSets[lastSets.length - 1].weight);
+    // Progressive overload: if last session had all sets done at rep max → +2.5lb
+    const lastReps = sessions[0].sets.filter(s => s.done).map(s => parseInt(s.reps) || 0);
+    const allAtRepMax = lastReps.length === ex.sets && lastReps.every(r => r >= ex.repsMax);
+    return isNaN(lastWeight) ? "" : String(allAtRepMax ? lastWeight + 2.5 : lastWeight);
+  }
+
   function buildEmptyExerciseData(wkt) {
     const data = {};
     wkt.exercises.forEach(ex => {
-      data[ex.id] = { sets: Array.from({ length: ex.sets }, () => ({ weight: "", reps: "", done: false })) };
+      const projected = projectWeight(ex.id, ex, selectedDay);
+      data[ex.id] = {
+        sets: Array.from({ length: ex.sets }, () => ({
+          weight: projected, reps: "", done: false, _projected: !!projected,
+        })),
+      };
     });
     return data;
   }
@@ -1055,65 +1587,94 @@ Provide a comprehensive post-workout analysis — judge everything through the l
         />
       ) : (
 
-      /* ── LIST MODE (existing) ─────────────────────────────────────────────── */
+      /* ── LIST MODE ─────────────────────────────────────────────────────────── */
       <div>
-        <div style={{ padding: "16px 16px 0" }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
-            <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} style={{ flex: 1, fontSize: 13, padding: "9px 12px" }} />
-            <button onClick={() => setMode("history")} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 8, padding: "9px 14px", color: "#555", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1.5, whiteSpace: "nowrap" }}>HISTORY</button>
-          </div>
+        {/* Spotify-style album header */}
+        {(() => {
+          const cover = COVERS[selectedDay] || COVERS.D1;
+          return (
+            <div style={{ padding: "0 0 0", background: `linear-gradient(180deg, ${cover.accent}22 0%, #121212 100%)` }}>
+              <div style={{ padding: "20px 16px 16px", display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 90, height: 90, borderRadius: 10, flexShrink: 0, background: cover.gradient, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", boxShadow: `0 8px 24px ${cover.accent}44` }}>
+                  <svg width="90" height="90" viewBox="0 0 90 90" style={{ position: "absolute", inset: 0, opacity: 0.12 }}>
+                    <circle cx="45" cy="45" r="38" fill="none" stroke="white" strokeWidth="2" />
+                    <circle cx="45" cy="45" r="20" fill="none" stroke="white" strokeWidth="1.5" />
+                    <circle cx="45" cy="45" r="5" fill="white" />
+                  </svg>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 30, color: "rgba(255,255,255,0.95)", letterSpacing: 2, position: "relative", zIndex: 1 }}>{cover.label}</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 4 }}>Workout</div>
+                  <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 3, lineHeight: 1.1 }}>{workout.name}</div>
+                  <div style={{ fontSize: 12, color: "#b3b3b3" }}>{workout.exercises.length} exercises · PPL Split</div>
+                </div>
+              </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
-            {Object.entries(PLAN.workouts).map(([key, wkt]) => {
-              const active = selectedDay === key;
-              return (
-                <button key={key} onClick={() => setSelectedDay(key)} style={{ background: active ? wkt.color : "#0f0f0f", color: active ? "#080808" : "#333", border: `1px solid ${active ? wkt.color : "#1a1a1a"}`, borderRadius: 10, padding: "10px 6px", fontFamily: "'Bebas Neue', sans-serif", fontSize: 17, letterSpacing: 0.5, transition: "all 0.15s" }}>
-                  {wkt.name}
-                </button>
-              );
-            })}
-          </div>
+              {/* Day selector pills */}
+              <div style={{ display: "flex", gap: 8, padding: "0 16px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
+                {Object.entries(PLAN.workouts).map(([key, wkt]) => {
+                  const active = selectedDay === key;
+                  return (
+                    <button key={key} onClick={() => setSelectedDay(key)} style={{ flexShrink: 0, background: active ? "#ffffff" : "#282828", color: active ? "#000000" : "#ffffff", borderRadius: 9999, padding: "6px 16px", fontSize: 12, fontWeight: 700, transition: "all 0.15s" }}>
+                      {wkt.name}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setMode("history")} style={{ flexShrink: 0, background: "transparent", color: "#b3b3b3", borderRadius: 9999, padding: "6px 16px", fontSize: 12, fontWeight: 400, border: "1px solid #4d4d4d" }}>History</button>
+              </div>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: workout.color, lineHeight: 1 }}>{workout.name}</div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1.5, marginTop: 3 }}>{workout.sub} · {workout.days}</div>
+              {/* Date + progress row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 14px" }}>
+                <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "7px 10px", borderRadius: 8 }} />
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, color: progressPct === 100 ? "#1ed760" : "#b3b3b3", whiteSpace: "nowrap" }}>{doneSets}/{totalSets}</div>
+              </div>
+              {progressPct > 0 && (
+                <div style={{ height: 3, background: "#282828", margin: "0 16px 14px", borderRadius: 9999, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${progressPct}%`, background: cover.accent, borderRadius: 9999, transition: "width 0.4s" }} />
+                </div>
+              )}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: progressPct === 100 ? "#c8f060" : "#333" }}>{doneSets}/{totalSets}</div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1 }}>SETS DONE</div>
-            </div>
-          </div>
+          );
+        })()}
 
-          <div style={{ height: 3, background: "#131313", borderRadius: 2, marginBottom: 16, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${progressPct}%`, background: workout.color, borderRadius: 2, transition: "width 0.4s ease" }} />
-          </div>
-
-          {/* START SESSION CTA */}
-          <button
-            onClick={() => { setSessionMode(true); setActiveExIdx(0); haptic.medium(); }}
-            style={{
-              width: "100%", marginBottom: 10,
-              background: workout.color, color: "#080808",
-              border: "none", borderRadius: 12,
-              padding: "15px",
-              fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            }}
-          >
-            START SESSION
-          </button>
-
-          {Object.keys(suggestions).length === 0 ? (
-            <button onClick={loadSuggestions} disabled={sugLoading} style={{ width: "100%", marginBottom: 14, background: sugLoading ? "#0a0a0a" : "#0d1a05", border: `1px solid ${sugLoading ? "#1a1a1a" : "#1e3310"}`, color: sugLoading ? "#333" : "#c8f060", borderRadius: 10, padding: "11px", fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2 }}>
-              {sugLoading ? <span className="shimmer">LOADING AI TARGETS...</span> : "⚡ GET TODAY'S AI TARGETS"}
+        <div style={{ padding: "0 16px 0" }}>
+          {/* START SESSION + AI targets row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            {/* Spotify circular play button */}
+            <button
+              onClick={() => { setSessionMode(true); setActiveExIdx(0); haptic.medium(); }}
+              style={{
+                width: 56, height: 56, flexShrink: 0,
+                background: COVERS[selectedDay]?.accent || "#1ed760",
+                borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: `0 8px 24px ${COVERS[selectedDay]?.accent || "#1ed760"}55`,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M4 3.5L16.5 10L4 16.5V3.5Z" fill="#000000" />
+              </svg>
             </button>
-          ) : (
-            <div style={{ background: "#0d1a05", border: "1px solid #1e3310", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 2, color: "#c8f060", marginBottom: 4 }}>AI TARGETS LOADED</div>
-              <div style={{ fontSize: 10, color: "#5a8a30" }}>Suggestions shown inline below each exercise</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+                {doneSets > 0 ? "Resume Session" : "Start Session"}
+              </div>
+              <div style={{ fontSize: 11, color: "#b3b3b3" }}>{workout.exercises.length} exercises · {totalSets} total sets</div>
             </div>
-          )}
+            {/* AI targets */}
+            <button
+              onClick={loadSuggestions}
+              disabled={sugLoading || Object.keys(suggestions).length > 0}
+              style={{
+                flexShrink: 0,
+                background: Object.keys(suggestions).length > 0 ? "#1ed76022" : "#282828",
+                color: Object.keys(suggestions).length > 0 ? "#1ed760" : "#b3b3b3",
+                borderRadius: 9999, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+              }}
+            >
+              {sugLoading ? "…" : Object.keys(suggestions).length > 0 ? "✓ AI" : "AI"}
+            </button>
+          </div>
         </div>
 
         <div style={{ padding: "0 16px" }}>
@@ -1144,22 +1705,22 @@ Provide a comprehensive post-workout analysis — judge everything through the l
           })}
 
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#333", marginBottom: 6 }}>SESSION NOTES</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Session Notes</div>
             <textarea placeholder="How'd it feel? Energy, pump, anything unusual..." rows={2} value={sessionNotes} onChange={e => setSessionNotes(e.target.value)} style={{ resize: "none", fontSize: 13, borderRadius: 10 }} />
           </div>
 
-          <button onClick={handleSave} style={{ width: "100%", background: saved ? "#0d1f05" : workout.color, color: saved ? workout.color : "#080808", border: saved ? `1px solid ${workout.color}33` : "none", padding: "15px", borderRadius: 12, fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 12, transition: "all 0.25s" }}>
-            {saved ? "✓ SESSION SAVED" : "SAVE SESSION"}
+          <button onClick={handleSave} style={{ width: "100%", background: saved ? "#1ed76022" : COVERS[selectedDay]?.accent || "#1ed760", color: saved ? "#1ed760" : "#000000", padding: "15px", borderRadius: 9999, fontWeight: 700, fontSize: 16, letterSpacing: 0.5, marginBottom: 12, transition: "all 0.25s" }}>
+            {saved ? "✓ Session Saved" : "Save Session"}
           </button>
 
           {saved && (
-            <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 24 }}>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
+            <div style={{ background: "#181818", borderRadius: 14, padding: 16, marginBottom: 24, boxShadow: "rgba(0,0,0,0.3) 0px 8px 8px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>Session Analysis</div>
               {analysis ? (
-                <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
+                <div style={{ fontSize: 13, color: "#b3b3b3", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
               ) : (
-                <button onClick={analyzeSession} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
-                  {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
+                <button onClick={analyzeSession} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#282828" : "#539df5", color: analyzing ? "#6a6a6a" : "#000000", padding: 13, borderRadius: 9999, fontWeight: 700, fontSize: 14 }}>
+                  {analyzing ? <span className="shimmer">Analyzing session...</span> : "Analyze My Workout"}
                 </button>
               )}
             </div>
