@@ -75,6 +75,11 @@ const store = {
 };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
+const WORKOUT_TINTS = {
+  D1: "#0b0e08", // push — warm green seeps into the dark
+  D2: "#08090e", // pull — cool blue underlights
+  D3: "#0e0b08", // legs — amber heat
+};
 const today = () => new Date().toISOString().split("T")[0];
 const fmt = (d) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const fmtFull = (d) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -713,7 +718,7 @@ function WorkoutTab({ logs, saveLog }) {
   const [analyzing, setAnalyzing] = useState(false);
   // Session mode
   const [sessionMode, setSessionMode] = useState(false);
-  const [focusedExIdx, setFocusedExIdx] = useState(0);
+  const [activeExIdx, setActiveExIdx] = useState(0);
 
   const workout = PLAN.workouts[selectedDay];
 
@@ -795,20 +800,21 @@ function WorkoutTab({ logs, saveLog }) {
 
   const markSetDone = (exId, setIdx) => {
     const wasDone = exerciseData[exId]?.sets[setIdx]?.done;
-    setExerciseData(prev => {
-      const exSets = [...(prev[exId]?.sets || [])];
-      exSets[setIdx] = { ...exSets[setIdx], done: !wasDone };
-      const allExDone = exSets.every(s => s.done);
-      if (!wasDone) {
-        if (allExDone) haptic.success();
-        else haptic.medium();
-      } else {
-        haptic.light();
-      }
-      return { ...prev, [exId]: { ...prev[exId], sets: exSets } };
-    });
-    if (!wasDone) setTimer({ restSecs: 90 });
-    setSaved(false);
+    const exSets = [...(exerciseData[exId]?.sets || [])];
+    exSets[setIdx] = { ...exSets[setIdx], done: !wasDone };
+    const newExData = { ...exerciseData, [exId]: { ...exerciseData[exId], sets: exSets } };
+    setExerciseData(newExData);
+    if (!wasDone) {
+      if (exSets.every(s => s.done)) haptic.success();
+      else haptic.medium();
+      // Auto-save on every set completion
+      saveLog(logDate, selectedDay, { ...newExData, _notes: sessionNotes, _overrides: overrides });
+      setSaved(true);
+      setTimer({ restSecs: 90 });
+    } else {
+      haptic.light();
+      setSaved(false);
+    }
   };
 
   const handleSave = () => {
@@ -1021,25 +1027,28 @@ Provide a comprehensive post-workout analysis — judge everything through the l
 
       {/* ── SESSION MODE ─────────────────────────────────────────────────────── */}
       {sessionMode ? (
-        <SessionExerciseView
+        <PerformanceHUD
           resolvedExercises={resolvedExercises}
-          focusedIdx={focusedExIdx}
+          activeExIdx={activeExIdx}
+          setActiveExIdx={setActiveExIdx}
           exerciseData={exerciseData}
           suggestions={suggestions}
           workoutColor={workout.color}
+          workoutBg={WORKOUT_TINTS[selectedDay] || "#080808"}
+          workoutName={workout.name}
           doneSets={doneSets}
           totalSets={totalSets}
-          progressPct={progressPct}
           sessionNotes={sessionNotes}
           saved={saved}
           analyzing={analyzing}
           analysis={analysis}
+          logs={logs}
+          logDate={logDate}
+          selectedDay={selectedDay}
           onSessionNotes={v => setSessionNotes(v)}
           onUpdateSet={(dataKey, si, f, v) => updateSet(dataKey, si, f, v)}
           onMarkDone={(dataKey, si) => markSetDone(dataKey, si)}
           onSwap={(exId) => setSwapTarget(exId)}
-          onNext={() => setFocusedExIdx(i => Math.min(i + 1, resolvedExercises.length - 1))}
-          onPrev={() => setFocusedExIdx(i => Math.max(i - 1, 0))}
           onExit={() => setSessionMode(false)}
           onSave={handleSave}
           onAnalyze={analyzeSession}
@@ -1082,7 +1091,7 @@ Provide a comprehensive post-workout analysis — judge everything through the l
 
           {/* START SESSION CTA */}
           <button
-            onClick={() => { setSessionMode(true); setFocusedExIdx(0); haptic.medium(); }}
+            onClick={() => { setSessionMode(true); setActiveExIdx(0); haptic.medium(); }}
             style={{
               width: "100%", marginBottom: 10,
               background: workout.color, color: "#080808",
@@ -1162,271 +1171,359 @@ Provide a comprehensive post-workout analysis — judge everything through the l
   );
 }
 
-// ─── SESSION EXERCISE VIEW ────────────────────────────────────────────────────
-function SessionExerciseView({
-  resolvedExercises, focusedIdx, exerciseData, suggestions, workoutColor,
-  doneSets, totalSets, progressPct,
-  sessionNotes, saved, analyzing, analysis,
-  onSessionNotes, onUpdateSet, onMarkDone, onSwap,
-  onNext, onPrev, onExit, onSave, onAnalyze,
+// ─── PERFORMANCE HUD ─────────────────────────────────────────────────────────
+function PerformanceHUD({
+  resolvedExercises, activeExIdx, setActiveExIdx, exerciseData, suggestions,
+  workoutColor, workoutBg, workoutName,
+  doneSets, totalSets, sessionNotes, saved, analyzing, analysis,
+  logs, logDate, selectedDay,
+  onSessionNotes, onUpdateSet, onMarkDone, onSwap, onExit, onSave, onAnalyze,
 }) {
-  const { planEx, effectiveEx, dataKey } = resolvedExercises[focusedIdx];
+  const [confirmFlash, setConfirmFlash] = useState(null); // { weight, reps, setNum }
+  const queueRef = useRef(null);
+
+  const { effectiveEx, dataKey } = resolvedExercises[activeExIdx];
   const exData = exerciseData[dataKey] || { sets: [] };
+  const activeSetIdx = exData.sets.findIndex(s => !s.done);
   const setsDoneForEx = exData.sets.filter(s => s.done).length;
   const allDoneForEx = setsDoneForEx === exData.sets.length && exData.sets.length > 0;
-  const activeSetIdx = exData.sets.findIndex(s => !s.done);
-  const suggestion = suggestions[dataKey];
   const isBodyweight = effectiveEx.startWeight === 0;
-  const isLast = focusedIdx === resolvedExercises.length - 1;
-  const isFirst = focusedIdx === 0;
   const allWorkoutDone = doneSets === totalSets && totalSets > 0;
+  const suggestion = suggestions[dataKey];
 
-  // Slide-in animation key (changes on exercise change)
-  const [slideKey, setSlideKey] = useState(focusedIdx);
-  useEffect(() => { setSlideKey(focusedIdx); }, [focusedIdx]);
+  // Pre-fill: same-session prev done set → last session → startWeight / repsMin
+  const getPrefill = (field) => {
+    const prevDone = [...exData.sets].reverse().find(s => s.done && s[field]);
+    if (prevDone) return String(prevDone[field]);
+    if (logs && field === "weight") {
+      const sortedDates = Object.keys(logs).sort().reverse();
+      for (const d of sortedDates) {
+        if (d === logDate) continue;
+        const entry = logs[d]?.[selectedDay]?.[dataKey];
+        if (!entry?.sets) continue;
+        const hit = [...entry.sets].reverse().find(s => s.done && s[field]);
+        if (hit) return String(hit[field]);
+      }
+    }
+    if (field === "weight" && effectiveEx.startWeight > 0) return String(effectiveEx.startWeight);
+    if (field === "reps" && effectiveEx.repsMin) return String(effectiveEx.repsMin);
+    return "";
+  };
+
+  // Scroll queue strip to active exercise
+  useEffect(() => {
+    if (!queueRef.current) return;
+    const el = queueRef.current.querySelector(`[data-qidx="${activeExIdx}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [activeExIdx]);
+
+  const handleLogSet = () => {
+    if (activeSetIdx < 0) return;
+    const currentSet = exData.sets[activeSetIdx];
+    // Auto-fill blanks from prefill before logging
+    const w = currentSet?.weight || getPrefill("weight");
+    const r = currentSet?.reps || getPrefill("reps");
+    if (!currentSet?.weight && w) onUpdateSet(dataKey, activeSetIdx, "weight", w);
+    if (!currentSet?.reps && r) onUpdateSet(dataKey, activeSetIdx, "reps", r);
+    // Stripe confirmation flash
+    setConfirmFlash({ weight: w, reps: r, setNum: activeSetIdx + 1 });
+    setTimeout(() => setConfirmFlash(null), 650);
+    // Mark done + auto-save (parent handles haptic + timer)
+    onMarkDone(dataKey, activeSetIdx);
+  };
+
+  // Jump to next incomplete exercise
+  const goNextIncomplete = () => {
+    const next = resolvedExercises.findIndex((r, i) => {
+      const exD = exerciseData[r.dataKey] || { sets: [] };
+      return i !== activeExIdx && exD.sets.some(s => !s.done);
+    });
+    if (next >= 0) { setActiveExIdx(next); haptic.light(); }
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 140px)", padding: "0 16px 16px" }}>
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 50,
+      background: workoutBg,
+      display: "flex", flexDirection: "column",
+      overflowY: "auto",
+    }}>
 
-      {/* ── Top bar: progress strip + exit ────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 16, marginBottom: 18 }}>
-        {/* Exercise dots */}
-        <div style={{ display: "flex", gap: 5, flex: 1 }}>
+      {/* ── TOP BAR ─────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 20px 0" }}>
+        <div style={{ display: "flex", gap: 4, flex: 1 }}>
           {resolvedExercises.map((r, i) => {
             const exD = exerciseData[r.dataKey] || { sets: [] };
             const done = exD.sets.length > 0 && exD.sets.every(s => s.done);
-            const active = i === focusedIdx;
+            const active = i === activeExIdx;
             return (
-              <div
-                key={r.planEx.id}
-                style={{
-                  flex: active ? 2 : 1,
-                  height: 3,
-                  borderRadius: 2,
-                  background: done ? workoutColor : active ? `${workoutColor}66` : "#1e1e1e",
-                  transition: "all 0.3s ease",
-                }}
-              />
+              <div key={r.planEx.id} style={{
+                flex: active ? 2.5 : 1, height: 3, borderRadius: 2,
+                background: done ? workoutColor : active ? `${workoutColor}55` : "#1a1a1a",
+                transition: "all 0.35s ease",
+              }} />
             );
           })}
         </div>
-        {/* Sets counter */}
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#333", letterSpacing: 1, whiteSpace: "nowrap" }}>
-          {doneSets}/{totalSets}
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#252525", letterSpacing: 1, whiteSpace: "nowrap" }}>
+          {doneSets}<span style={{ color: "#181818" }}>/{totalSets}</span>
         </div>
-        {/* Exit to list */}
-        <button
-          onClick={onExit}
-          style={{ background: "none", color: "#2a2a2a", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1, padding: "4px 0" }}
-        >
+        <button onClick={onExit} style={{ background: "none", color: "#252525", fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 1 }}>
           LIST ↗
         </button>
       </div>
 
-      {/* ── Exercise name + meta ───────────────────────────────────────── */}
-      <div key={slideKey} className="fade-in" style={{ marginBottom: 6 }}>
-        <div style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 3,
-          color: workoutColor, marginBottom: 8,
-        }}>
-          {focusedIdx + 1} / {resolvedExercises.length}
-        </div>
-        <div style={{
-          fontFamily: "'Bebas Neue', sans-serif",
-          fontSize: 52,
-          lineHeight: 1,
-          color: allDoneForEx ? "#2a2a2a" : "#ededed",
-          letterSpacing: 0.5,
-          transition: "color 0.4s",
-          marginBottom: 8,
-        }}>
-          {effectiveEx.name}
-        </div>
-        <div style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2a2a2a",
-          letterSpacing: 1.5, marginBottom: 12, lineHeight: 1.7,
-        }}>
-          {effectiveEx.sets} × {effectiveEx.repsMin}{effectiveEx.repsMin !== effectiveEx.repsMax ? `–${effectiveEx.repsMax}` : "s"}{" "}
-          {!isBodyweight && `· ${effectiveEx.note}`}
-        </div>
-        {isBodyweight && (
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2a2a2a", letterSpacing: 1, marginBottom: 12, lineHeight: 1.7 }}>
-            {effectiveEx.note}
-          </div>
-        )}
-      </div>
-
-      {/* ── AI target ─────────────────────────────────────────────────── */}
-      {suggestion && (
-        <div style={{ background: "#0c1803", border: "1px solid #1a2d08", borderRadius: 10, padding: "10px 12px", marginBottom: 18 }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: workoutColor === "#c8f060" ? "#c8f060" : workoutColor, letterSpacing: 1.5, marginBottom: 3 }}>AI TARGET</div>
-          <div style={{ fontSize: 12, color: "#6a9a36", lineHeight: 1.6 }}>{suggestion}</div>
-        </div>
-      )}
-
-      {/* ── Set circles ───────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 24, flexWrap: "wrap" }}>
-        {exData.sets.map((set, si) => {
-          const isDone = set.done;
-          const isActive = si === activeSetIdx;
-          const hasData = set.weight || set.reps;
+      {/* ── EXERCISE QUEUE STRIP ────────────────────────────────────────── */}
+      <div
+        ref={queueRef}
+        style={{
+          display: "flex", gap: 8, overflowX: "auto",
+          padding: "16px 20px 0",
+          scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {resolvedExercises.map((r, i) => {
+          const exD = exerciseData[r.dataKey] || { sets: [] };
+          const done = exD.sets.length > 0 && exD.sets.every(s => s.done);
+          const active = i === activeExIdx;
           return (
             <button
-              key={si}
-              onClick={() => onMarkDone(dataKey, si)}
+              key={r.planEx.id}
+              data-qidx={i}
+              onClick={() => { setActiveExIdx(i); haptic.light(); }}
               style={{
-                width: 74, height: 74,
-                borderRadius: "50%",
-                background: isDone
-                  ? workoutColor
-                  : isActive ? "#141414" : "#0d0d0d",
-                border: isDone
-                  ? `2px solid ${workoutColor}`
-                  : isActive
-                  ? `2px solid ${workoutColor}44`
-                  : "2px solid #181818",
-                display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center",
-                gap: 3,
-                transition: "all 0.25s ease",
-                boxShadow: isDone
-                  ? `0 0 20px ${workoutColor}28`
-                  : isActive
-                  ? `0 0 14px ${workoutColor}12`
-                  : "none",
                 flexShrink: 0,
-                cursor: "pointer",
+                background: active ? workoutColor : done ? "#111" : "#0c0c0c",
+                border: active ? "none" : `1px solid ${done ? "#1e1e1e" : "#141414"}`,
+                borderRadius: 20, padding: "6px 14px",
+                fontFamily: "'DM Mono', monospace", fontSize: 8, letterSpacing: 1.5,
+                color: active ? "#080808" : done ? `${workoutColor}55` : "#252525",
+                whiteSpace: "nowrap",
+                transition: "all 0.2s",
               }}
             >
-              <span style={{
-                fontFamily: "'Bebas Neue', sans-serif",
-                fontSize: isDone ? 26 : 22,
-                color: isDone ? "#080808" : isActive ? workoutColor : "#252525",
-                lineHeight: 1,
-                transition: "all 0.2s",
-              }}>
-                {isDone ? "✓" : si + 1}
-              </span>
-              {!isDone && hasData && (
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#333", letterSpacing: 0.5, textAlign: "center" }}>
-                  {set.weight || "BW"}{!isBodyweight && "lb"}×{set.reps}
-                </span>
-              )}
+              {done && !active ? "✓ " : ""}{r.effectiveEx.name.toUpperCase()}
             </button>
           );
         })}
       </div>
 
-      {/* ── Weight + reps inputs for active set ───────────────────────── */}
-      {activeSetIdx >= 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+      {/* ── EXERCISE NAME + CONTEXT ─────────────────────────────────────── */}
+      <div style={{ padding: "22px 20px 0" }}>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 8,
+          color: `${workoutColor}77`, letterSpacing: 2.5, marginBottom: 6,
+        }}>
+          {workoutName} · {activeExIdx + 1} OF {resolvedExercises.length}
+        </div>
+        <div style={{
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: 50, lineHeight: 1,
+          color: allDoneForEx ? "#252525" : "#f0f0f0",
+          letterSpacing: 0.5, transition: "color 0.4s",
+        }}>
+          {effectiveEx.name}
+        </div>
+        {activeSetIdx >= 0 && (
+          <div style={{
+            fontFamily: "'DM Mono', monospace", fontSize: 9,
+            color: workoutColor, letterSpacing: 2, marginTop: 8,
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          }}>
+            <span>SET {activeSetIdx + 1} OF {exData.sets.length}</span>
+            {suggestion && <span style={{ color: "#252525" }}>· {suggestion}</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── DIGITAL READOUTS ────────────────────────────────────────────── */}
+      {activeSetIdx >= 0 ? (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isBodyweight ? "1fr" : "1fr 1fr",
+          gap: 10, padding: "22px 20px 0",
+        }}>
           {!isBodyweight && (
-            <div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1.5, marginBottom: 6, textAlign: "center" }}>WEIGHT (LBS)</div>
+            <div style={{
+              background: "#080808", border: "1px solid #181818",
+              borderRadius: 16, padding: "16px 12px 12px",
+              display: "flex", flexDirection: "column", alignItems: "center",
+            }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#222", letterSpacing: 2.5, marginBottom: 6 }}>LBS</div>
               <input
-                type="number"
-                inputMode="decimal"
-                placeholder={effectiveEx.startWeight > 0 ? String(effectiveEx.startWeight) : "—"}
+                type="number" inputMode="decimal"
+                placeholder={getPrefill("weight") || "—"}
                 value={exData.sets[activeSetIdx]?.weight || ""}
                 onChange={e => onUpdateSet(dataKey, activeSetIdx, "weight", e.target.value)}
-                style={{ textAlign: "center", fontSize: 26, fontFamily: "'Bebas Neue', sans-serif", padding: "14px 8px", borderRadius: 12, letterSpacing: 1, background: "#0f0f0f", border: "1px solid #1e1e1e" }}
+                style={{
+                  width: "100%", textAlign: "center",
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  fontSize: 58, lineHeight: 1, letterSpacing: 1,
+                  color: "#efefef",
+                  background: "transparent", border: "none", outline: "none",
+                  caretColor: workoutColor,
+                }}
               />
+              <div style={{ width: "60%", height: 1, background: "#1c1c1c", marginTop: 10 }} />
             </div>
           )}
-          <div style={{ gridColumn: isBodyweight ? "1 / -1" : "auto" }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 1.5, marginBottom: 6, textAlign: "center" }}>
+          <div style={{
+            background: "#080808", border: "1px solid #181818",
+            borderRadius: 16, padding: "16px 12px 12px",
+            display: "flex", flexDirection: "column", alignItems: "center",
+            gridColumn: isBodyweight ? "1 / -1" : "auto",
+          }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 7, color: "#222", letterSpacing: 2.5, marginBottom: 6 }}>
               {isBodyweight ? "REPS / SECS" : "REPS"}
             </div>
             <input
-              type="number"
-              inputMode="numeric"
-              placeholder={`${effectiveEx.repsMin}–${effectiveEx.repsMax}`}
+              type="number" inputMode="numeric"
+              placeholder={getPrefill("reps") || String(effectiveEx.repsMin || "")}
               value={exData.sets[activeSetIdx]?.reps || ""}
               onChange={e => onUpdateSet(dataKey, activeSetIdx, "reps", e.target.value)}
-              style={{ textAlign: "center", fontSize: 26, fontFamily: "'Bebas Neue', sans-serif", padding: "14px 8px", borderRadius: 12, letterSpacing: 1, background: "#0f0f0f", border: "1px solid #1e1e1e" }}
+              style={{
+                width: "100%", textAlign: "center",
+                fontFamily: "'Bebas Neue', sans-serif",
+                fontSize: 58, lineHeight: 1, letterSpacing: 1,
+                color: "#efefef",
+                background: "transparent", border: "none", outline: "none",
+                caretColor: workoutColor,
+              }}
             />
+            <div style={{ width: "60%", height: 1, background: "#1c1c1c", marginTop: 10 }} />
           </div>
         </div>
-      )}
-
-      {/* ── All sets done banner ───────────────────────────────────────── */}
-      {allDoneForEx && (
+      ) : allDoneForEx ? (
         <div style={{
-          background: `${workoutColor}0e`,
-          border: `1px solid ${workoutColor}22`,
-          borderRadius: 12, padding: "14px 16px",
-          display: "flex", alignItems: "center", gap: 12,
-          marginBottom: 20,
+          margin: "22px 20px 0",
+          background: `${workoutColor}0a`, border: `1px solid ${workoutColor}1e`,
+          borderRadius: 14, padding: "18px 16px",
+          display: "flex", alignItems: "center", gap: 14,
         }}>
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: workoutColor, lineHeight: 1 }}>DONE</div>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: `${workoutColor}88`, letterSpacing: 1 }}>
-            {isLast ? "LAST EXERCISE · SAVE BELOW" : "TAP NEXT TO CONTINUE"}
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 30, color: workoutColor, lineHeight: 1 }}>DONE</div>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: `${workoutColor}55`, letterSpacing: 1 }}>
+            {allWorkoutDone ? "ALL SETS COMPLETE" : "TAP QUEUE TO JUMP"}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Spacer */}
-      <div style={{ flex: 1 }} />
-
-      {/* ── Nav buttons ───────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-        <button
-          onClick={() => { onPrev(); haptic.light(); }}
-          disabled={isFirst}
-          style={{
-            background: "transparent",
-            color: isFirst ? "#181818" : "#333",
-            border: `1px solid ${isFirst ? "#111" : "#1e1e1e"}`,
-            borderRadius: 12, padding: "14px",
-            fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: 2,
-            transition: "all 0.15s",
-          }}
-        >
-          ← PREV
-        </button>
-        <button
-          onClick={() => { isLast ? onSave() : (onNext(), haptic.light()); }}
-          style={{
-            background: isLast ? (saved ? "#0d1f05" : workoutColor) : workoutColor,
-            color: isLast ? (saved ? workoutColor : "#080808") : "#080808",
-            border: isLast && saved ? `1px solid ${workoutColor}33` : "none",
-            borderRadius: 12, padding: "14px",
-            fontFamily: isLast ? "'Bebas Neue', sans-serif" : "'DM Mono', monospace",
-            fontSize: isLast ? 20 : 10,
-            letterSpacing: isLast ? 1 : 2,
-            transition: "all 0.25s",
-          }}
-        >
-          {isLast ? (saved ? "✓ SAVED" : "SAVE SESSION") : "NEXT →"}
-        </button>
+      {/* ── SET STATUS DOTS ─────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 8, padding: "18px 20px 0", flexWrap: "wrap" }}>
+        {exData.sets.map((set, si) => {
+          const isDone = set.done;
+          const isActiveSi = si === activeSetIdx;
+          return (
+            <button
+              key={si}
+              onClick={() => onMarkDone(dataKey, si)}
+              style={{
+                width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+                background: isDone ? workoutColor : isActiveSi ? "#141414" : "#0d0d0d",
+                border: isDone
+                  ? `2px solid ${workoutColor}`
+                  : isActiveSi ? `2px solid ${workoutColor}44` : "2px solid #161616",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.2s", cursor: "pointer",
+              }}
+            >
+              <span style={{
+                fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, lineHeight: 1,
+                color: isDone ? "#080808" : isActiveSi ? workoutColor : "#1e1e1e",
+              }}>
+                {isDone ? "✓" : si + 1}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Session notes + post-workout analysis (last exercise) ─────── */}
-      {isLast && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#2a2a2a", letterSpacing: 2, marginBottom: 6 }}>SESSION NOTES</div>
+      {/* Spacer */}
+      <div style={{ flex: 1, minHeight: 20 }} />
+
+      {/* ── POST-WORKOUT: notes + analysis ──────────────────────────────── */}
+      {allWorkoutDone && (
+        <div style={{ padding: "0 20px 14px" }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 8, color: "#252525", letterSpacing: 2, marginBottom: 6 }}>SESSION NOTES</div>
           <textarea
             placeholder="Energy, pump, anything unusual..."
             rows={2}
             value={sessionNotes}
             onChange={e => onSessionNotes(e.target.value)}
-            style={{ resize: "none", fontSize: 13, borderRadius: 10 }}
+            style={{ resize: "none", fontSize: 13, borderRadius: 10, marginBottom: 12 }}
           />
-        </div>
-      )}
-
-      {isLast && saved && (
-        <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 8 }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
-          {analysis ? (
-            <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
-          ) : (
-            <button onClick={onAnalyze} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
-              {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
-            </button>
+          {saved && (
+            <div style={{ background: "#080d14", border: "1px solid #1a2a3a", borderRadius: 14, padding: 16, marginBottom: 4 }}>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, letterSpacing: 2, color: "#60b8f0", marginBottom: 10 }}>SESSION ANALYSIS</div>
+              {analysis ? (
+                <div style={{ fontSize: 13, color: "#a0c8e0", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{analysis}</div>
+              ) : (
+                <button onClick={onAnalyze} disabled={analyzing} style={{ width: "100%", background: analyzing ? "#0d0d0d" : "#60b8f0", color: analyzing ? "#333" : "#080808", padding: 13, borderRadius: 10, fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 1 }}>
+                  {analyzing ? <span className="shimmer">ANALYZING SESSION...</span> : "ANALYZE MY WORKOUT"}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
+
+      {/* ── PRIMARY ACTION BUTTON ────────────────────────────────────────── */}
+      <div style={{ padding: "0 20px 44px" }}>
+        {activeSetIdx >= 0 ? (
+          /* LOG SET — the main CTA */
+          <button
+            onClick={handleLogSet}
+            style={{
+              width: "100%", height: 68,
+              background: confirmFlash ? "#0c180a" : workoutColor,
+              color: confirmFlash ? workoutColor : "#080808",
+              border: confirmFlash ? `1px solid ${workoutColor}33` : "none",
+              borderRadius: 16,
+              fontFamily: "'Bebas Neue', sans-serif",
+              fontSize: confirmFlash ? 15 : 30,
+              letterSpacing: confirmFlash ? 1 : 3,
+              transition: "background 0.12s, color 0.12s, font-size 0.12s",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            {confirmFlash
+              ? `✓ ${confirmFlash.weight || "BW"}${!isBodyweight ? "lb" : ""} × ${confirmFlash.reps || "—"} · SET ${confirmFlash.setNum} LOGGED`
+              : "LOG SET"
+            }
+          </button>
+        ) : allWorkoutDone ? (
+          /* Save session */
+          <button
+            onClick={onSave}
+            style={{
+              width: "100%", height: 68,
+              background: saved ? "#0d1f05" : workoutColor,
+              color: saved ? workoutColor : "#080808",
+              border: saved ? `1px solid ${workoutColor}33` : "none",
+              borderRadius: 16,
+              fontFamily: "'Bebas Neue', sans-serif",
+              fontSize: 28, letterSpacing: 2,
+              transition: "all 0.25s",
+            }}
+          >
+            {saved ? "✓ SESSION SAVED" : "SAVE SESSION"}
+          </button>
+        ) : (
+          /* Current exercise done — jump to next incomplete */
+          <button
+            onClick={goNextIncomplete}
+            style={{
+              width: "100%", height: 68,
+              background: "#0e0e0e", border: `1px solid ${workoutColor}2a`,
+              borderRadius: 16,
+              fontFamily: "'Bebas Neue', sans-serif",
+              fontSize: 24, letterSpacing: 2,
+              color: workoutColor,
+            }}
+          >
+            NEXT EXERCISE →
+          </button>
+        )}
+      </div>
     </div>
   );
 }
