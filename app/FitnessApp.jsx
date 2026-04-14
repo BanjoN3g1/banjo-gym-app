@@ -210,68 +210,50 @@ const haptic = {
 };
 
 // ─── OURA ────────────────────────────────────────────────────────────────────
-const OURA_CLIENT_ID = "fe301c05-aceb-4b65-8c02-263cb21a5eb3";
-const OURA_REDIRECT_URI = "https://banjo-gym-app.vercel.app/oura/callback";
-const OURA_SCOPES = "daily heartrate"; // daily covers sleep, activity, readiness
+// Uses Personal Access Token (PAT) — simpler than OAuth2 for a personal app.
+// PAT goes directly as Bearer token, no exchange/refresh flow needed.
+// PAT is stored as oura_pat in localStorage; expiry set to 0 = never.
+
+function getOuraPAT() {
+  return localStorage.getItem("oura_pat") || "";
+}
+
+function saveOuraPAT(pat) {
+  if (pat) {
+    localStorage.setItem("oura_pat", pat.trim());
+    localStorage.setItem("oura_access_token", pat.trim()); // also set as access_token for compat
+    localStorage.setItem("oura_token_expiry", "0"); // 0 = never expires
+  } else {
+    localStorage.removeItem("oura_pat");
+    localStorage.removeItem("oura_access_token");
+    localStorage.removeItem("oura_token_expiry");
+  }
+}
 
 function getOuraToken() {
-  return localStorage.getItem("oura_access_token") || "";
+  // PAT takes priority; fallback to OAuth access token
+  return localStorage.getItem("oura_pat") || localStorage.getItem("oura_access_token") || "";
 }
 
 function isOuraConnected() {
-  const token = getOuraToken();
+  const pat = getOuraPAT();
+  if (pat) return true; // PATs don't expire (or expire after years)
+  const token = localStorage.getItem("oura_access_token") || "";
   if (!token) return false;
   const expiry = parseInt(localStorage.getItem("oura_token_expiry") || "0");
-  // Consider expired if within 1 hour of expiry
   return expiry === 0 || expiry > Date.now() + 3600000;
 }
 
-function connectOura() {
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: OURA_CLIENT_ID,
-    redirect_uri: OURA_REDIRECT_URI,
-    scope: OURA_SCOPES,
-  });
-  window.location.href = `https://cloud.ouraring.com/oauth/authorize?${params}`;
-}
-
 function disconnectOura() {
+  localStorage.removeItem("oura_pat");
   localStorage.removeItem("oura_access_token");
   localStorage.removeItem("oura_refresh_token");
   localStorage.removeItem("oura_token_expiry");
 }
 
-async function refreshOuraToken() {
-  const refreshToken = localStorage.getItem("oura_refresh_token");
-  if (!refreshToken) return false;
-  try {
-    const res = await fetch("/api/oura", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "refresh", refresh_token: refreshToken }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.access_token) return false;
-    localStorage.setItem("oura_access_token", data.access_token);
-    if (data.refresh_token) localStorage.setItem("oura_refresh_token", data.refresh_token);
-    const expiry = Date.now() + (data.expires_in || 2592000) * 1000;
-    localStorage.setItem("oura_token_expiry", String(expiry));
-    return true;
-  } catch { return false; }
-}
-
 async function fetchOura(endpoint, params) {
-  let token = getOuraToken();
+  const token = getOuraToken();
   if (!token) return null;
-
-  // Auto-refresh if near expiry
-  const expiry = parseInt(localStorage.getItem("oura_token_expiry") || "0");
-  if (expiry > 0 && expiry < Date.now() + 3600000) {
-    const refreshed = await refreshOuraToken();
-    if (!refreshed) return null;
-    token = getOuraToken();
-  }
 
   try {
     const res = await fetch("/api/oura", {
@@ -279,57 +261,54 @@ async function fetchOura(endpoint, params) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "fetch", token, endpoint, params }),
     });
-    if (res.status === 401) {
-      // Try refresh once
-      const refreshed = await refreshOuraToken();
-      if (!refreshed) return null;
-      token = getOuraToken();
-      const retry = await fetch("/api/oura", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "fetch", token, endpoint, params }),
-      });
-      if (!retry.ok) return null;
-      return await retry.json();
-    }
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
 }
 
 async function syncOuraForDate(date) {
-  // Fetch sleep, activity, readiness in parallel
-  const [sleepRes, activityRes, readinessRes] = await Promise.all([
-    fetchOura("sleep", { start_date: date, end_date: date }),
+  // Fetch all 4 endpoints in parallel
+  const [dailySleepRes, sleepRes, activityRes, readinessRes] = await Promise.all([
+    fetchOura("daily_sleep",    { start_date: date, end_date: date }),
+    fetchOura("sleep",          { start_date: date, end_date: date }),
     fetchOura("daily_activity", { start_date: date, end_date: date }),
-    fetchOura("daily_readiness", { start_date: date, end_date: date }),
+    fetchOura("daily_readiness",{ start_date: date, end_date: date }),
   ]);
 
   const result = {};
 
-  // Sleep — use longest sleep session for the night
-  if (sleepRes?.data?.length) {
-    const mainSleep = sleepRes.data.reduce((best, s) =>
-      (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best
-    , sleepRes.data[0]);
-    result.hours = Math.round((mainSleep.total_sleep_duration || 0) / 360) / 10;
-    result.score = mainSleep.score || null;
-    result.hrv = Math.round(mainSleep.average_hrv || 0) || null;
-    result.deepMins = Math.round((mainSleep.deep_sleep_duration || 0) / 60);
-    result.remMins = Math.round((mainSleep.rem_sleep_duration || 0) / 60);
-    result.efficiency = mainSleep.efficiency || null;
-    result.restingHR = Math.round(mainSleep.average_heart_rate || 0) || null;
+  // Score comes from daily_sleep (authoritative), not individual sessions
+  if (dailySleepRes?.data?.length) {
+    result.score = dailySleepRes.data[0].score || null;
   }
 
-  // Steps + active calories
+  // HRV, duration, stages from the longest sleep session
+  if (sleepRes?.data?.length) {
+    // Filter to main sleep sessions only (exclude naps etc.)
+    const sessions = sleepRes.data.filter(s => s.type !== "rest" && s.type !== "late_nap");
+    const pool = sessions.length ? sessions : sleepRes.data;
+    const main = pool.reduce((best, s) =>
+      (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best
+    , pool[0]);
+    result.hours    = Math.round((main.total_sleep_duration  || 0) / 360) / 10;
+    result.hrv      = Math.round(main.average_hrv            || 0) || null;
+    result.deepMins = Math.round((main.deep_sleep_duration   || 0) / 60);
+    result.remMins  = Math.round((main.rem_sleep_duration    || 0) / 60);
+    result.efficiency   = main.efficiency           || null;
+    result.restingHR    = Math.round(main.average_heart_rate || 0) || null;
+    // Fallback score if daily_sleep didn't return one
+    if (!result.score) result.score = main.score || null;
+  }
+
+  // Steps + active cals from daily_activity
   if (activityRes?.data?.length) {
     const act = activityRes.data[0];
-    result.steps = act.steps || 0;
+    result.steps          = act.steps           || 0;
     result.activeCalories = act.active_calories || 0;
-    result.activityScore = act.score || null;
+    result.activityScore  = act.score           || null;
   }
 
-  // Readiness
+  // Readiness score
   if (readinessRes?.data?.length) {
     result.readinessScore = readinessRes.data[0].score || null;
   }
@@ -738,6 +717,29 @@ export default function App() {
   const [apiKey, setApiKey] = useState(getApiKey());
   const [ouraConnected, setOuraConnected] = useState(isOuraConnected());
   const [showSettings, setShowSettings] = useState(!getApiKey());
+  const [ouraPATInput, setOuraPATInput] = useState("");
+
+  // Auto-sync Oura on mount if connected and data is missing
+  useEffect(() => {
+    if (!isOuraConnected()) return;
+    const hour = new Date().getHours();
+    if (hour < 6) return; // Oura data not ready yet
+    const todayStr = today();
+    setSleep(prev => {
+      if (!prev[todayStr]?.hours) {
+        syncOuraForDate(todayStr).then(data => {
+          if (data) {
+            setSleep(prevInner => {
+              const next = { ...prevInner, [todayStr]: { ...(prevInner[todayStr] || {}), ...data } };
+              store.set("sleep", next);
+              return next;
+            });
+          }
+        });
+      }
+      return prev;
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveLog = useCallback((date, workout, data) => {
     const next = { ...logs, [date]: { ...logs[date], [workout]: data } };
@@ -813,17 +815,41 @@ export default function App() {
             <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => saveApiKey(e.target.value)} style={{ marginBottom: 16, fontSize: 13 }} />
             <div style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>Oura Ring</div>
             {ouraConnected ? (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1a2a1a", borderRadius: 12, padding: "12px 14px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1ed760" }} />
-                  <span style={{ fontSize: 13, color: "#1ed760" }}>Connected</span>
+              <div style={{ background: "#1a2a1a", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1ed760" }} />
+                    <span style={{ fontSize: 13, color: "#1ed760", fontWeight: 700 }}>Connected</span>
+                  </div>
+                  <button onClick={() => { disconnectOura(); setOuraConnected(false); setOuraPATInput(""); }} style={{ background: "none", color: "#b3b3b3", fontSize: 12 }}>Disconnect</button>
                 </div>
-                <button onClick={() => { disconnectOura(); setOuraConnected(false); }} style={{ background: "none", color: "#b3b3b3", fontSize: 12 }}>Disconnect</button>
+                <div style={{ fontSize: 11, color: "#6a6a6a", letterSpacing: 0.2 }}>Auto-syncs sleep, activity & readiness each morning after 6 AM</div>
               </div>
             ) : (
-              <button onClick={connectOura} style={{ width: "100%", background: "#1a2a1a", borderRadius: 12, padding: "13px", color: "#1ed760", fontSize: 13, fontWeight: 700 }}>
-                Connect Oura Ring →
-              </button>
+              <div>
+                <input
+                  type="password"
+                  placeholder="Paste your Personal Access Token..."
+                  value={ouraPATInput}
+                  onChange={e => setOuraPATInput(e.target.value)}
+                  style={{ marginBottom: 8, fontSize: 13 }}
+                />
+                <button
+                  onClick={() => {
+                    const pat = ouraPATInput.trim();
+                    if (!pat) return;
+                    saveOuraPAT(pat);
+                    setOuraConnected(true);
+                    setOuraPATInput("");
+                  }}
+                  style={{ width: "100%", background: "#1a2a1a", borderRadius: 12, padding: "13px", color: "#1ed760", fontSize: 13, fontWeight: 700 }}
+                >
+                  Save Token →
+                </button>
+                <div style={{ fontSize: 11, color: "#6a6a6a", marginTop: 8, letterSpacing: 0.2 }}>
+                  Get your token at cloud.ouraring.com → Personal Access Tokens
+                </div>
+              </div>
             )}
           </div>
         </div>
