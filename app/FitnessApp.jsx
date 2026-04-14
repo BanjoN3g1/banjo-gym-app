@@ -1074,8 +1074,16 @@ function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNu
         <div style={{ fontSize: 10, color: "#6a6a6a", marginTop: 6 }}>Target: {PLAN.targetWeight}lb at {PLAN.targetBF}% BF by May 15</div>
       </div>
 
+      {/* ── WORKOUT CALENDAR ──────────────────────────────────────────── */}
+      <div style={{ padding: "20px 16px 0" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>This Month</div>
+        <WorkoutCalendar logs={logs} />
+      </div>
+
       {/* ── OURA CARD ────────────────────────────────────────────────── */}
-      <OuraHomeCard sleep={sleep} saveSleep={saveSleep} date={d} />
+      <div style={{ marginTop: 16 }}>
+        <OuraHomeCard sleep={sleep} saveSleep={saveSleep} date={d} />
+      </div>
 
     </div>
   );
@@ -1478,6 +1486,88 @@ function LibraryTab({ logs, goTrain }) {
   );
 }
 
+// ─── WORKOUT CALENDAR ────────────────────────────────────────────────────────
+function WorkoutCalendar({ logs, compact = false, onDayPress }) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = today();
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  // Build a map of date → { dayKey, cover }
+  const workoutMap = {};
+  Object.entries(logs).forEach(([date, dayData]) => {
+    if (!date.startsWith(`${year}-${String(month+1).padStart(2,"0")}`)) return;
+    const dayKey = Object.keys(dayData).find(k => PLAN.workouts[k] && Object.values(dayData[k] || {}).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done)));
+    if (dayKey) workoutMap[date] = { dayKey, cover: COVERS[dayKey] };
+  });
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const cellSize = compact ? 36 : 42;
+
+  return (
+    <div style={{ background: "#181818", borderRadius: 14, padding: compact ? "12px 12px" : "16px" }}>
+      {!compact && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#b3b3b3", letterSpacing: 1.5, textTransform: "uppercase" }}>
+            {monthNames[month]} {year}
+          </div>
+          <div style={{ fontSize: 11, color: "#6a6a6a" }}>
+            {Object.keys(workoutMap).length} sessions
+          </div>
+        </div>
+      )}
+      {compact && (
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#6a6a6a", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 8 }}>
+          {monthNames[month]}
+        </div>
+      )}
+      {/* Day labels */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
+        {["S","M","T","W","T","F","S"].map((d, i) => (
+          <div key={i} style={{ textAlign: "center", fontSize: 9, color: "#3a3a3a", fontWeight: 700, fontFamily: "'DM Mono', monospace", letterSpacing: 1 }}>{d}</div>
+        ))}
+      </div>
+      {/* Day cells */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={i} />;
+          const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+          const workout = workoutMap[dateStr];
+          const isToday = dateStr === todayStr;
+          const accent = workout?.cover?.accent;
+          return (
+            <button
+              key={i}
+              onClick={() => workout && onDayPress && onDayPress(dateStr, workout.dayKey)}
+              style={{
+                height: cellSize, borderRadius: 8,
+                background: workout ? `${accent}22` : isToday ? "#282828" : "transparent",
+                border: isToday ? "1px solid #444" : workout ? `1px solid ${accent}44` : "1px solid transparent",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+                cursor: workout ? "pointer" : "default",
+                transition: "all 0.15s",
+              }}
+            >
+              <span style={{ fontSize: compact ? 10 : 11, fontWeight: isToday ? 700 : 400, color: workout ? accent : isToday ? "#ffffff" : "#4a4a4a" }}>
+                {day}
+              </span>
+              {workout && (
+                <div style={{ width: compact ? 4 : 5, height: compact ? 4 : 5, borderRadius: "50%", background: accent, flexShrink: 0 }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── WORKOUT TAB ─────────────────────────────────────────────────────────────
 function WorkoutTab({ logs, saveLog, initialDay }) {
   const [mode, setMode] = useState("live");
@@ -1496,9 +1586,8 @@ function WorkoutTab({ logs, saveLog, initialDay }) {
   // Post-workout analysis
   const [analysis, setAnalysis] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  // Session mode
-  const [sessionMode, setSessionMode] = useState(false);
-  const [activeExIdx, setActiveExIdx] = useState(0);
+  // Program filter
+  const [selectedProgram, setSelectedProgram] = useState("B0475");
 
   const workout = PLAN.workouts[selectedDay];
 
@@ -1535,6 +1624,15 @@ function WorkoutTab({ logs, saveLog, initialDay }) {
     setSuggestions({});
     setAnalysis("");
   }, [selectedDay, logDate, logs]);
+
+  // Auto-select the day that has saved sets when logDate changes
+  useEffect(() => {
+    const loggedDay = Object.keys(PLAN.workouts).find(key => {
+      const d = logs[logDate]?.[key];
+      return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+    });
+    if (loggedDay) setSelectedDay(loggedDay);
+  }, [logDate]);
 
   // Project weight for an exercise based on recent history + progressive overload
   function projectWeight(exId, ex, dayKey) {
@@ -1802,16 +1900,6 @@ Provide a comprehensive post-workout analysis — judge everything through the l
     );
   }
 
-  // Build resolved exercises list (with overrides applied) for session mode
-  const resolvedExercises = workout.exercises.map(ex => {
-    const override = overrides[ex.id];
-    return {
-      planEx: ex,
-      effectiveEx: override || ex,
-      dataKey: override ? override.id : ex.id,
-    };
-  });
-
   return (
     <div className="fade-in">
       {timer && <RestTimer seconds={timer.restSecs} onDone={() => setTimer(null)} onSkip={() => setTimer(null)} />}
@@ -1826,37 +1914,6 @@ Provide a comprehensive post-workout analysis — judge everything through the l
         />
       )}
 
-      {/* ── SESSION MODE ─────────────────────────────────────────────────────── */}
-      {sessionMode ? (
-        <PerformanceHUD
-          resolvedExercises={resolvedExercises}
-          activeExIdx={activeExIdx}
-          setActiveExIdx={setActiveExIdx}
-          exerciseData={exerciseData}
-          suggestions={suggestions}
-          workoutColor={workout.color}
-          workoutBg={WORKOUT_TINTS[selectedDay] || "#080808"}
-          workoutName={workout.name}
-          doneSets={doneSets}
-          totalSets={totalSets}
-          sessionNotes={sessionNotes}
-          saved={saved}
-          analyzing={analyzing}
-          analysis={analysis}
-          logs={logs}
-          logDate={logDate}
-          selectedDay={selectedDay}
-          onSessionNotes={v => setSessionNotes(v)}
-          onUpdateSet={(dataKey, si, f, v) => updateSet(dataKey, si, f, v)}
-          onMarkDone={(dataKey, si) => markSetDone(dataKey, si)}
-          onSwap={(exId) => setSwapTarget(exId)}
-          onExit={() => setSessionMode(false)}
-          onSave={handleSave}
-          onAnalyze={analyzeSession}
-        />
-      ) : (
-
-      /* ── LIST MODE ─────────────────────────────────────────────────────────── */
       <div>
         {/* Spotify-style album header */}
         {(() => {
@@ -1874,26 +1931,47 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                 </div>
               </div>
 
-              {/* Day selector pills — grey out days logged on this date */}
+              {/* Program filter pills */}
+              <div style={{ display: "flex", gap: 8, padding: "0 16px 8px", overflowX: "auto", scrollbarWidth: "none" }}>
+                {[{ id: "B0475", label: "B0475" }, { id: "GLOW", label: "Glow Up" }].map(p => (
+                  <button key={p.id} onClick={() => setSelectedProgram(p.id)} style={{
+                    flexShrink: 0,
+                    background: selectedProgram === p.id ? "#1ed76022" : "transparent",
+                    color: selectedProgram === p.id ? "#1ed760" : "#6a6a6a",
+                    border: `1px solid ${selectedProgram === p.id ? "#1ed76044" : "#2a2a2a"}`,
+                    borderRadius: 9999, padding: "4px 12px", fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+                    transition: "all 0.15s",
+                  }}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Day selector pills — logged day highlighted, others greyed */}
               <div style={{ display: "flex", gap: 8, padding: "0 16px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
                 {Object.entries(PLAN.workouts).map(([key, wkt]) => {
                   const active = selectedDay === key;
-                  // Check if this day has any done sets saved for the current logDate
                   const dayLog = logs[logDate]?.[key];
                   const doneSetsForDay = dayLog
                     ? Object.values(dayLog).reduce((s, ex) => s + (Array.isArray(ex?.sets) ? ex.sets.filter(set => set.done).length : 0), 0)
                     : 0;
-                  const isLogged = doneSetsForDay > 0 && !active;
-                  const isComplete = doneSetsForDay > 0 && active && progressPct === 100;
+                  const isLogged = doneSetsForDay > 0;
+                  // If any day is logged, grey out all non-logged, non-active days
+                  const anyDayLogged = Object.keys(PLAN.workouts).some(k => {
+                    const d = logs[logDate]?.[k];
+                    return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+                  });
+                  const dimmed = anyDayLogged && !isLogged && !active;
+                  const accentColor = COVERS[key]?.accent || "#1ed760";
                   return (
                     <button key={key} onClick={() => setSelectedDay(key)} style={{
                       flexShrink: 0,
-                      background: active ? "#ffffff" : isLogged ? "#1a1a1a" : "#282828",
-                      color: active ? "#000000" : isLogged ? "#3a3a3a" : "#ffffff",
+                      background: active ? "#ffffff" : isLogged ? "#1a2a1a" : "#282828",
+                      color: active ? "#000000" : isLogged ? accentColor : dimmed ? "#444" : "#b3b3b3",
                       borderRadius: 9999, padding: "6px 16px", fontSize: 12, fontWeight: 700,
+                      border: isLogged && !active ? `1px solid ${accentColor}44` : "1px solid transparent",
                       transition: "all 0.15s",
-                      textDecoration: isLogged ? "line-through" : "none",
-                      opacity: isLogged ? 0.5 : 1,
+                      opacity: dimmed ? 0.5 : 1,
                     }}>
                       {isLogged ? `✓ ${wkt.name}` : wkt.name}
                     </button>
@@ -1916,31 +1994,27 @@ Provide a comprehensive post-workout analysis — judge everything through the l
           );
         })()}
 
+        {/* Compact calendar */}
+        <div style={{ padding: "0 16px 12px" }}>
+          <WorkoutCalendar
+            logs={logs}
+            compact={true}
+            onDayPress={(date, dayKey) => {
+              setLogDate(date);
+              setSelectedDay(dayKey);
+            }}
+          />
+        </div>
+
         <div style={{ padding: "0 16px 0" }}>
-          {/* START SESSION + AI targets row */}
+          {/* AI targets row */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-            {/* Spotify circular play button */}
-            <button
-              onClick={() => { setSessionMode(true); setActiveExIdx(0); haptic.medium(); }}
-              style={{
-                width: 56, height: 56, flexShrink: 0,
-                background: COVERS[selectedDay]?.accent || "#1ed760",
-                borderRadius: "50%",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: `0 8px 24px ${COVERS[selectedDay]?.accent || "#1ed760"}55`,
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path d="M4 3.5L16.5 10L4 16.5V3.5Z" fill="#000000" />
-              </svg>
-            </button>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-                {doneSets > 0 ? "Resume Session" : "Start Session"}
+                {workout.name} · {workout.sub}
               </div>
               <div style={{ fontSize: 11, color: "#b3b3b3" }}>{workout.exercises.length} exercises · {totalSets} total sets</div>
             </div>
-            {/* AI targets */}
             <button
               onClick={loadSuggestions}
               disabled={sugLoading || Object.keys(suggestions).length > 0}
@@ -1948,10 +2022,10 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                 flexShrink: 0,
                 background: Object.keys(suggestions).length > 0 ? "#1ed76022" : "#282828",
                 color: Object.keys(suggestions).length > 0 ? "#1ed760" : "#b3b3b3",
-                borderRadius: 9999, padding: "6px 12px", fontSize: 11, fontWeight: 700,
+                borderRadius: 9999, padding: "8px 14px", fontSize: 11, fontWeight: 700,
               }}
             >
-              {sugLoading ? "…" : Object.keys(suggestions).length > 0 ? "✓ AI" : "AI"}
+              {sugLoading ? "…" : Object.keys(suggestions).length > 0 ? "✓ AI Targets" : "AI Targets"}
             </button>
           </div>
         </div>
@@ -1979,6 +2053,16 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                 onMarkDone={(id, si) => markSetDone(dataKey, si)}
                 onSwap={() => setSwapTarget(ex.id)}
                 onRestoreOriginal={override ? () => removeOverride(ex.id) : null}
+                onAddSet={() => {
+                  const sets = exerciseData[dataKey]?.sets || [];
+                  const lastSet = sets[sets.length - 1];
+                  const newSet = { weight: lastSet?.weight || "", reps: "", done: false };
+                  setExerciseData(prev => ({
+                    ...prev,
+                    [dataKey]: { ...prev[dataKey], sets: [...(prev[dataKey]?.sets || []), newSet] }
+                  }));
+                  setSaved(false);
+                }}
               />
             );
           })}
@@ -2006,7 +2090,6 @@ Provide a comprehensive post-workout analysis — judge everything through the l
           )}
         </div>
       </div>
-      )}
     </div>
   );
 }
@@ -2369,7 +2452,7 @@ function PerformanceHUD({
 }
 
 // ─── EXERCISE CARD ────────────────────────────────────────────────────────────
-function ExerciseCard({ ex, originalExName, exData, index, suggestion, allDone, workoutColor, onUpdateSet, onMarkDone, onSwap, onRestoreOriginal }) {
+function ExerciseCard({ ex, originalExName, exData, index, suggestion, allDone, workoutColor, onUpdateSet, onMarkDone, onSwap, onRestoreOriginal, onAddSet }) {
   const [expanded, setExpanded] = useState(true);
   const doneSets = exData.sets.filter(s => s.done).length;
   const isBodyweight = ex.startWeight === 0;
@@ -2458,6 +2541,19 @@ function ExerciseCard({ ex, originalExName, exData, index, suggestion, allDone, 
               ✦ Top of range hit — ready to add {ex.increment > 0 ? `${ex.increment}lbs` : "reps"} next time
             </div>
           )}
+
+          <button
+            onClick={onAddSet}
+            style={{
+              marginTop: 10, width: "100%",
+              background: "transparent", border: `1px dashed #2a2a2a`,
+              borderRadius: 8, padding: "7px", fontSize: 11, fontWeight: 700,
+              color: "#3a3a3a", letterSpacing: 0.5,
+              transition: "all 0.15s",
+            }}
+          >
+            + Add Set
+          </button>
         </div>
       )}
     </div>
