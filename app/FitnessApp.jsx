@@ -405,27 +405,65 @@ async function callClaudeSonnet(prompt, systemPrompt, retries = 3) {
 
 // ─── REST TIMER ──────────────────────────────────────────────────────────────
 function RestTimer({ seconds, onDone, onSkip, nextSetHint }) {
+  const endAtRef = useRef(Date.now() + seconds * 1000);
   const [remaining, setRemaining] = useState(seconds);
   const intervalRef = useRef(null);
+  const firedRef = useRef(false);
+
+  // Notify SW to cancel timer on unmount
+  const cancelSWTimer = () => {
+    navigator.serviceWorker?.ready.then(reg => {
+      reg.active?.postMessage({ type: "cancelTimer" });
+    }).catch(() => {});
+  };
+
+  // Fire alarm once — wall-clock safe
+  const fire = useCallback(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    clearInterval(intervalRef.current);
+    cancelSWTimer();
+    playAlarm();
+    setTimeout(onDone, 800);
+  }, [onDone]);
 
   useEffect(() => {
+    // Schedule SW notification (fires even if JS is paused in background)
+    const delay = endAtRef.current - Date.now();
+    if (delay > 0) {
+      navigator.serviceWorker?.ready.then(reg => {
+        reg.active?.postMessage({
+          type: "scheduleTimer",
+          delay,
+          title: "Rest over — next set!",
+          body: "Time to get back to it.",
+        });
+      }).catch(() => {});
+    }
+
+    // Wall-clock interval — ticks every 500ms so it self-corrects after backgrounding
     intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(intervalRef.current);
-          playAlarm();
-          setTimeout(onDone, 800);
-          return 0;
-        }
-        if (r <= 10) {
-          haptic.tick();
-          if (r === 11) playBeep(440, 0.1);
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(intervalRef.current);
-  }, []);
+      const rem = Math.max(0, Math.ceil((endAtRef.current - Date.now()) / 1000));
+      setRemaining(rem);
+      if (rem > 0 && rem <= 10) haptic.tick();
+      if (rem === 0) fire();
+    }, 500);
+
+    // visibilitychange — immediately catches an expired timer when you switch back
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const rem = Math.max(0, Math.ceil((endAtRef.current - Date.now()) / 1000));
+      setRemaining(rem);
+      if (rem === 0) fire();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisible);
+      cancelSWTimer();
+    };
+  }, [fire]);
 
   const circumference = 2 * Math.PI * 90;
   const strokeDashoffset = circumference * (1 - remaining / seconds);
@@ -718,6 +756,16 @@ export default function App() {
   const [ouraConnected, setOuraConnected] = useState(isOuraConnected());
   const [showSettings, setShowSettings] = useState(!getApiKey());
   const [ouraPATInput, setOuraPATInput] = useState("");
+
+  // Register service worker + request notification permission on mount
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Auto-sync Oura on mount if connected and data is missing
   useEffect(() => {
