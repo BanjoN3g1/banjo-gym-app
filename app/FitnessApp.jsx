@@ -983,7 +983,7 @@ export default function App() {
 
       {/* CONTENT */}
       <div style={{ paddingBottom: 80 }}>
-        {tab === "home"    && <HomeTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} saveBW={saveBW} saveSleep={saveSleep} saveNutrition={saveNutrition} goTrain={goTrain} onSettings={() => setShowSettings(true)} />}
+        {tab === "home"    && <HomeTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} saveBW={saveBW} saveSleep={saveSleep} saveSleepAll={saveSleepAll} saveNutrition={saveNutrition} goTrain={goTrain} onSettings={() => setShowSettings(true)} />}
         {tab === "train"   && <WorkoutTab logs={logs} saveLog={saveLog} initialDay={trainDay} />}
         {tab === "library" && <LibraryTab logs={logs} goTrain={goTrain} />}
         {tab === "stats"   && <ProgressTab logs={logs} nutrition={nutrition} sleep={sleep} bodyweight={bodyweight} />}
@@ -1013,7 +1013,7 @@ export default function App() {
 }
 
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNutrition, goTrain, onSettings }) {
+function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveSleepAll, saveNutrition, goTrain, onSettings }) {
   const d = today();
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
