@@ -80,7 +80,12 @@ const WORKOUT_TINTS = {
   D2: "#08090e", // pull — cool blue underlights
   D3: "#0e0b08", // legs — amber heat
 };
-const today = () => new Date().toISOString().split("T")[0];
+// Always use LOCAL date — toISOString() gives UTC which mismatches local day-of-week
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
+const localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const fmt = (d) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const fmtFull = (d) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 const daysUntil = (d) => Math.max(0, Math.ceil((new Date(d + "T12:00:00") - new Date()) / 86400000));
@@ -1493,15 +1498,25 @@ function WorkoutCalendar({ logs, compact = false, onDayPress }) {
   const month = now.getMonth();
   const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayStr = today();
+  const todayStr = localDateStr(new Date()); // local date, not UTC
   const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-  // Build a map of date → { dayKey, cover }
+  // Build a map of date → { dayKey, cover, hasDone }
   const workoutMap = {};
   Object.entries(logs).forEach(([date, dayData]) => {
     if (!date.startsWith(`${year}-${String(month+1).padStart(2,"0")}`)) return;
-    const dayKey = Object.keys(dayData).find(k => PLAN.workouts[k] && Object.values(dayData[k] || {}).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done)));
-    if (dayKey) workoutMap[date] = { dayKey, cover: COVERS[dayKey] };
+    // Detect any workout data (weight/reps entered or sets marked done)
+    const dayKey = Object.keys(dayData).find(k =>
+      PLAN.workouts[k] && Object.values(dayData[k] || {}).some(ex =>
+        Array.isArray(ex?.sets) && ex.sets.some(s => s.weight || s.reps || s.done)
+      )
+    );
+    if (dayKey) {
+      const hasDone = Object.values(dayData[dayKey] || {}).some(ex =>
+        Array.isArray(ex?.sets) && ex.sets.some(s => s.done)
+      );
+      workoutMap[date] = { dayKey, cover: COVERS[dayKey], hasDone };
+    }
   });
 
   const cells = [];
@@ -1558,12 +1573,12 @@ function WorkoutCalendar({ logs, compact = false, onDayPress }) {
                 {day}
               </span>
               {workout && !compact && (
-                <span style={{ fontSize: 7, fontWeight: 700, color: accent, fontFamily: "'DM Mono', monospace", letterSpacing: 0.3, lineHeight: 1 }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: accent, fontFamily: "'DM Mono', monospace", letterSpacing: 0.3, lineHeight: 1, opacity: workout.hasDone ? 1 : 0.5 }}>
                   {PLAN.workouts[workout.dayKey]?.name?.slice(0,4) || ""}
                 </span>
               )}
               {workout && compact && (
-                <div style={{ width: 4, height: 4, borderRadius: "50%", background: accent, flexShrink: 0 }} />
+                <div style={{ width: 4, height: 4, borderRadius: "50%", background: accent, flexShrink: 0, opacity: workout.hasDone ? 1 : 0.4 }} />
               )}
             </button>
           );
@@ -1630,11 +1645,11 @@ function WorkoutTab({ logs, saveLog, initialDay }) {
     setAnalysis("");
   }, [selectedDay, logDate, logs]);
 
-  // Auto-select the day that has saved sets when logDate changes
+  // Auto-select the day that has saved data when logDate changes
   useEffect(() => {
     const loggedDay = Object.keys(PLAN.workouts).find(key => {
       const d = logs[logDate]?.[key];
-      return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+      return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.weight || s.reps || s.done));
     });
     if (loggedDay) setSelectedDay(loggedDay);
   }, [logDate, logs]);
@@ -1957,14 +1972,14 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                 {Object.entries(PLAN.workouts).map(([key, wkt]) => {
                   const active = selectedDay === key;
                   const dayLog = logs[logDate]?.[key];
-                  const doneSetsForDay = dayLog
-                    ? Object.values(dayLog).reduce((s, ex) => s + (Array.isArray(ex?.sets) ? ex.sets.filter(set => set.done).length : 0), 0)
-                    : 0;
-                  const isLogged = doneSetsForDay > 0;
-                  // If any day is logged, grey out all non-logged, non-active days
+                  // Logged = any exercise has weight/reps entered or done (not just done)
+                  const isLogged = dayLog
+                    ? Object.values(dayLog).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.weight || s.reps || s.done))
+                    : false;
+                  // If any day is logged on this date, dim the non-logged days
                   const anyDayLogged = Object.keys(PLAN.workouts).some(k => {
                     const d = logs[logDate]?.[k];
-                    return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+                    return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.weight || s.reps || s.done));
                   });
                   const dimmed = anyDayLogged && !isLogged && !active;
                   const accentColor = COVERS[key]?.accent || "#1ed760";
@@ -1987,26 +2002,38 @@ Provide a comprehensive post-workout analysis — judge everything through the l
 
               {/* 14-day date scroller with workout dots */}
               {(() => {
+                const now = new Date();
+                // Use local midnight as base to avoid UTC/local day-of-week mismatch
+                const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const todayLocal = localDateStr(base);
+                const dayLetters = ["S","M","T","W","T","F","S"];
                 const days14 = Array.from({ length: 14 }, (_, i) => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - (13 - i));
-                  const dateStr = d.toISOString().split("T")[0];
-                  const dayLetters = ["S","M","T","W","T","F","S"];
-                  const dayLetter = dayLetters[d.getDay()];
+                  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() - (13 - i));
+                  const dateStr = localDateStr(d);
+                  const dayLetter = dayLetters[d.getDay()]; // consistent — both local
                   const dayNum = d.getDate();
-                  // Find if any workout was logged this day
+                  // Show dot for any saved workout data (done or not)
                   const loggedKey = Object.keys(PLAN.workouts).find(k => {
                     const dat = logs[dateStr]?.[k];
-                    return dat && Object.values(dat).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+                    if (!dat) return false;
+                    return Object.values(dat).some(ex =>
+                      Array.isArray(ex?.sets) && ex.sets.some(s => s.weight || s.reps || s.done)
+                    );
                   });
                   const dotColor = loggedKey ? COVERS[loggedKey]?.accent : null;
-                  return { dateStr, dayLetter, dayNum, dotColor, loggedKey };
+                  const hasDone = loggedKey ? Object.values(logs[dateStr]?.[loggedKey] || {}).some(ex =>
+                    Array.isArray(ex?.sets) && ex.sets.some(s => s.done)
+                  ) : false;
+                  return { dateStr, dayLetter, dayNum, dotColor, hasDone };
                 });
                 return (
-                  <div style={{ display: "flex", gap: 4, padding: "0 16px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
-                    {days14.map(({ dateStr, dayLetter, dayNum, dotColor }) => {
+                  <div
+                    ref={el => { if (el) el.scrollLeft = el.scrollWidth; }}
+                    style={{ display: "flex", gap: 4, padding: "0 16px 12px", overflowX: "auto", scrollbarWidth: "none" }}
+                  >
+                    {days14.map(({ dateStr, dayLetter, dayNum, dotColor, hasDone }) => {
                       const isSelected = dateStr === logDate;
-                      const isToday = dateStr === today();
+                      const isToday = dateStr === todayLocal;
                       return (
                         <button
                           key={dateStr}
@@ -2023,7 +2050,7 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                           <span style={{ fontSize: 9, fontWeight: 700, color: isSelected ? "#ffffff" : "#4a4a4a", fontFamily: "'DM Mono', monospace", letterSpacing: 0.5 }}>{dayLetter}</span>
                           <span style={{ fontSize: 13, fontWeight: isToday ? 700 : 400, color: isSelected ? "#ffffff" : isToday ? "#ffffff" : "#6a6a6a" }}>{dayNum}</span>
                           {dotColor
-                            ? <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor }} />
+                            ? <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor, opacity: hasDone ? 1 : 0.4 }} />
                             : <div style={{ width: 5, height: 5 }} />
                           }
                         </button>
