@@ -1508,7 +1508,7 @@ function WorkoutCalendar({ logs, compact = false, onDayPress }) {
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const cellSize = compact ? 36 : 42;
+  const cellSize = compact ? 34 : 48;
 
   return (
     <div style={{ background: "#181818", borderRadius: 14, padding: compact ? "12px 12px" : "16px" }}>
@@ -1547,8 +1547,8 @@ function WorkoutCalendar({ logs, compact = false, onDayPress }) {
               onClick={() => workout && onDayPress && onDayPress(dateStr, workout.dayKey)}
               style={{
                 height: cellSize, borderRadius: 8,
-                background: workout ? `${accent}22` : isToday ? "#282828" : "transparent",
-                border: isToday ? "1px solid #444" : workout ? `1px solid ${accent}44` : "1px solid transparent",
+                background: workout ? (compact ? `${accent}22` : `${accent}18`) : isToday ? "#282828" : "transparent",
+                border: isToday ? "1px solid #444" : workout ? `1px solid ${accent}${compact ? "44" : "55"}` : "1px solid transparent",
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
                 cursor: workout ? "pointer" : "default",
                 transition: "all 0.15s",
@@ -1557,8 +1557,13 @@ function WorkoutCalendar({ logs, compact = false, onDayPress }) {
               <span style={{ fontSize: compact ? 10 : 11, fontWeight: isToday ? 700 : 400, color: workout ? accent : isToday ? "#ffffff" : "#4a4a4a" }}>
                 {day}
               </span>
-              {workout && (
-                <div style={{ width: compact ? 4 : 5, height: compact ? 4 : 5, borderRadius: "50%", background: accent, flexShrink: 0 }} />
+              {workout && !compact && (
+                <span style={{ fontSize: 7, fontWeight: 700, color: accent, fontFamily: "'DM Mono', monospace", letterSpacing: 0.3, lineHeight: 1 }}>
+                  {PLAN.workouts[workout.dayKey]?.name?.slice(0,4) || ""}
+                </span>
+              )}
+              {workout && compact && (
+                <div style={{ width: 4, height: 4, borderRadius: "50%", background: accent, flexShrink: 0 }} />
               )}
             </button>
           );
@@ -1632,7 +1637,7 @@ function WorkoutTab({ logs, saveLog, initialDay }) {
       return d && Object.values(d).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
     });
     if (loggedDay) setSelectedDay(loggedDay);
-  }, [logDate]);
+  }, [logDate, logs]);
 
   // Project weight for an exercise based on recent history + progressive overload
   function projectWeight(exId, ex, dayKey) {
@@ -1980,9 +1985,57 @@ Provide a comprehensive post-workout analysis — judge everything through the l
                 <button onClick={() => setMode("history")} style={{ flexShrink: 0, background: "transparent", color: "#b3b3b3", borderRadius: 9999, padding: "6px 16px", fontSize: 12, fontWeight: 400, border: "1px solid #4d4d4d" }}>History</button>
               </div>
 
-              {/* Date + progress row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 14px" }}>
-                <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "7px 10px", borderRadius: 8 }} />
+              {/* 14-day date scroller with workout dots */}
+              {(() => {
+                const days14 = Array.from({ length: 14 }, (_, i) => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - (13 - i));
+                  const dateStr = d.toISOString().split("T")[0];
+                  const dayLetters = ["S","M","T","W","T","F","S"];
+                  const dayLetter = dayLetters[d.getDay()];
+                  const dayNum = d.getDate();
+                  // Find if any workout was logged this day
+                  const loggedKey = Object.keys(PLAN.workouts).find(k => {
+                    const dat = logs[dateStr]?.[k];
+                    return dat && Object.values(dat).some(ex => Array.isArray(ex?.sets) && ex.sets.some(s => s.done));
+                  });
+                  const dotColor = loggedKey ? COVERS[loggedKey]?.accent : null;
+                  return { dateStr, dayLetter, dayNum, dotColor, loggedKey };
+                });
+                return (
+                  <div style={{ display: "flex", gap: 4, padding: "0 16px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
+                    {days14.map(({ dateStr, dayLetter, dayNum, dotColor }) => {
+                      const isSelected = dateStr === logDate;
+                      const isToday = dateStr === today();
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => setLogDate(dateStr)}
+                          style={{
+                            flexShrink: 0, width: 38,
+                            background: isSelected ? (COVERS[selectedDay]?.accent || "#ffffff") + "22" : "transparent",
+                            border: isSelected ? `1px solid ${COVERS[selectedDay]?.accent || "#ffffff"}44` : "1px solid transparent",
+                            borderRadius: 10, padding: "6px 0",
+                            display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          <span style={{ fontSize: 9, fontWeight: 700, color: isSelected ? "#ffffff" : "#4a4a4a", fontFamily: "'DM Mono', monospace", letterSpacing: 0.5 }}>{dayLetter}</span>
+                          <span style={{ fontSize: 13, fontWeight: isToday ? 700 : 400, color: isSelected ? "#ffffff" : isToday ? "#ffffff" : "#6a6a6a" }}>{dayNum}</span>
+                          {dotColor
+                            ? <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor }} />
+                            : <div style={{ width: 5, height: 5 }} />
+                          }
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Progress row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 6px" }}>
+                <div style={{ flex: 1, fontSize: 12, color: "#b3b3b3" }}>{fmtFull(logDate)}</div>
                 <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, color: progressPct === 100 ? "#1ed760" : "#b3b3b3", whiteSpace: "nowrap" }}>{doneSets}/{totalSets}</div>
               </div>
               {progressPct > 0 && (
@@ -1993,18 +2046,6 @@ Provide a comprehensive post-workout analysis — judge everything through the l
             </div>
           );
         })()}
-
-        {/* Compact calendar */}
-        <div style={{ padding: "0 16px 12px" }}>
-          <WorkoutCalendar
-            logs={logs}
-            compact={true}
-            onDayPress={(date, dayKey) => {
-              setLogDate(date);
-              setSelectedDay(dayKey);
-            }}
-          />
-        </div>
 
         <div style={{ padding: "0 16px 0" }}>
           {/* AI targets row */}
