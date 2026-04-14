@@ -1598,7 +1598,7 @@ function OuraDashboard({ sleep, saveSleep, saveSleepAll, date }) {
               <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700 }}>Readiness</span>
-                  {readinessScore ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(readinessScore) }}>{readinessScore} today</span> : null}
+                  {cardData.readinessScore ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(cardData.readinessScore) }}>{cardData.readinessScore} yesterday</span> : null}
                 </div>
                 <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 48 }}>
                   {last14.map(({ ds, data, isToday }) => {
