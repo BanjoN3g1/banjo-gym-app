@@ -1073,7 +1073,7 @@ function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNu
 
       {/* ── RECOVERY ──────────────────────────────────────────────────── */}
       <div style={{ marginTop: 0, padding: "0 16px 12px" }}>
-        <OuraHomeCard sleep={sleep} saveSleep={saveSleep} date={d} />
+        <OuraDashboard sleep={sleep} saveSleep={saveSleep} date={d} />
       </div>
 
       {/* ── WEIGHT TREND + PACE ───────────────────────────────────────── */}
@@ -1194,117 +1194,323 @@ function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNu
   );
 }
 
-// ─── OURA HOME CARD ───────────────────────────────────────────────────────────
-function OuraHomeCard({ sleep, saveSleep, date }) {
+// ─── OURA DASHBOARD ───────────────────────────────────────────────────────────
+function OuraDashboard({ sleep, saveSleep, date }) {
   const [syncing, setSyncing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const ouraConnected = isOuraConnected();
-  const todaySleep = sleep[date] || {};
-  const hasSleepData = todaySleep.hours > 0;
+  const [showDrill, setShowDrill] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [manualForm, setManualForm] = useState({ hours: "", score: "" });
+  const ouraOn = isOuraConnected();
+  const tod = sleep[date] || {};
+  const hasData = (tod.hours > 0) || (tod.score > 0) || (tod.steps > 0);
 
-  const doSync = async () => {
-    if (!ouraConnected) return;
+  const scoreColor = (s) => !s ? "#3a3a3a" : s >= 85 ? "#1ed760" : s >= 70 ? "#ffa42b" : "#f3727f";
+  const stepsToMiles = (s) => s ? (s / 2000).toFixed(1) : null;
+
+  const doSync = async (targetDate) => {
+    if (!ouraOn) return;
     setSyncing(true);
     try {
-      const data = await syncOuraForDate(date);
-      if (data) saveSleep(date, { ...todaySleep, ...data });
+      const data = await syncOuraForDate(targetDate || date);
+      if (data) saveSleep(targetDate || date, { ...(sleep[targetDate || date] || {}), ...data });
     } catch {}
     setSyncing(false);
   };
 
-  // Manual log state
-  const [showManual, setShowManual] = useState(false);
-  const [manualHours, setManualHours] = useState("");
+  // Last 14 days for history
+  const last14 = Array.from({ length: 14 }, (_, i) => {
+    const d2 = new Date();
+    d2.setDate(d2.getDate() - 13 + i);
+    const ds = localDateStr(d2);
+    return { ds, data: sleep[ds] || {}, isToday: ds === date, dayLabel: ["Su","Mo","Tu","We","Th","Fr","Sa"][d2.getDay()] };
+  });
 
-  if (!ouraConnected && !hasSleepData) return (
-    <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-      <div style={{ fontSize: 24 }}>🔴</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>Recovery</div>
-        <div style={{ fontSize: 11, color: "#6a6a6a" }}>Connect Oura or log manually</div>
-      </div>
-      <button onClick={() => setShowManual(!showManual)} style={{ background: "#282828", borderRadius: 9999, padding: "6px 14px", fontSize: 11, fontWeight: 700, color: "#ffffff" }}>
-        Log
-      </button>
-      {showManual && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end" }} onClick={e => { if (e.target === e.currentTarget) setShowManual(false); }}>
-          <div style={{ background: "#181818", borderRadius: "20px 20px 0 0", padding: "20px 20px 48px", width: "100%", maxWidth: 480, margin: "0 auto" }}>
-            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>Log Sleep</div>
-            <div style={{ fontSize: 11, color: "#b3b3b3", marginBottom: 6 }}>Hours slept</div>
-            <input type="number" inputMode="decimal" placeholder="7.5" value={manualHours} onChange={e => setManualHours(e.target.value)} style={{ marginBottom: 12 }} />
-            <button onClick={() => { if (manualHours) { saveSleep(date, { ...todaySleep, hours: parseFloat(manualHours) }); setShowManual(false); } }} style={{ width: "100%", background: "#1ed760", color: "#000", borderRadius: 9999, padding: 12, fontWeight: 700, fontSize: 14 }}>Save</button>
-          </div>
+  const sleepScore = tod.score;
+  const readinessScore = tod.readinessScore;
+  const activityScore = tod.activityScore;
+  const steps = tod.steps;
+  const miles = stepsToMiles(steps);
+
+  if (!ouraOn && !hasData) return (
+    <>
+      <div style={{ background: "#181818", borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Recovery & Activity</div>
+          <div style={{ fontSize: 11, color: "#6a6a6a", marginTop: 2 }}>No Oura — log manually</div>
         </div>
-      )}
-    </div>
+        <button onClick={() => setShowManual(true)} style={{ background: "#282828", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: "#ffffff" }}>Log</button>
+      </div>
+      {showManual && <ManualSleepSheet tod={tod} date={date} saveSleep={saveSleep} onClose={() => setShowManual(false)} />}
+    </>
   );
 
   return (
-    <div>
-      <button onClick={() => setExpanded(!expanded)} style={{ width: "100%", background: "#181818", borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, textAlign: "left", transition: "background 0.15s" }}>
+    <>
+      {/* ── COMPACT CARD ─────────────────────────────────────────────── */}
+      <button
+        onClick={() => setShowDrill(true)}
+        style={{ width: "100%", background: "#181818", borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, textAlign: "left" }}
+      >
         {/* Sleep score ring */}
-        <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#282828", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, position: "relative" }}>
-          {todaySleep.score && (
-            <svg width="48" height="48" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}>
-              <circle cx="24" cy="24" r="20" fill="none" stroke="#282828" strokeWidth="3" />
-              <circle cx="24" cy="24" r="20" fill="none" stroke={todaySleep.score >= 80 ? "#1ed760" : todaySleep.score >= 60 ? "#ffa42b" : "#f3727f"} strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={`${2*Math.PI*20}`} strokeDashoffset={`${2*Math.PI*20*(1 - todaySleep.score/100)}`} style={{ transition: "stroke-dashoffset 0.6s ease" }} />
-            </svg>
-          )}
-          <span style={{ fontSize: hasSleepData ? 12 : 20, fontWeight: 700, color: "#ffffff", position: "relative" }}>
-            {hasSleepData ? (todaySleep.score || "🌙") : "🌙"}
-          </span>
+        <div style={{ width: 54, height: 54, position: "relative", flexShrink: 0 }}>
+          <svg width="54" height="54" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}>
+            <circle cx="27" cy="27" r="23" fill="none" stroke="#252525" strokeWidth="3.5" />
+            {sleepScore && (
+              <circle cx="27" cy="27" r="23" fill="none" stroke={scoreColor(sleepScore)} strokeWidth="3.5" strokeLinecap="round"
+                strokeDasharray={`${2 * Math.PI * 23}`}
+                strokeDashoffset={`${2 * Math.PI * 23 * (1 - sleepScore / 100)}`}
+                style={{ transition: "stroke-dashoffset 0.6s ease" }}
+              />
+            )}
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            {sleepScore ? (
+              <>
+                <span style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 17, color: "#ffffff", lineHeight: 1 }}>{sleepScore}</span>
+                <span style={{ fontSize: 7, color: "#6a6a6a", fontWeight: 700, letterSpacing: 0.5 }}>SLEEP</span>
+              </>
+            ) : (
+              <span style={{ fontSize: 20 }}>🌙</span>
+            )}
+          </div>
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Recovery</div>
-          {hasSleepData ? (
-            <div style={{ fontSize: 11, color: "#b3b3b3" }}>
-              {todaySleep.hours}h sleep
-              {todaySleep.hrv ? ` · ${todaySleep.hrv}ms HRV` : ""}
-              {todaySleep.steps ? ` · ${(todaySleep.steps/1000).toFixed(1)}k steps` : ""}
-            </div>
-          ) : (
-            <div style={{ fontSize: 11, color: "#6a6a6a" }}>No data for today</div>
-          )}
+
+        {/* Metrics summary */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>Recovery</span>
+            {readinessScore ? (
+              <span style={{ fontSize: 10, fontWeight: 700, color: scoreColor(readinessScore), background: `${scoreColor(readinessScore)}18`, borderRadius: 9999, padding: "2px 8px" }}>
+                {readinessScore} ready
+              </span>
+            ) : null}
+          </div>
+          <div style={{ fontSize: 11, color: "#b3b3b3", display: "flex", flexWrap: "wrap", gap: "2px 10px" }}>
+            {tod.hours > 0 && <span>💤 {tod.hours}h</span>}
+            {tod.hrv > 0 && <span>❤️ {tod.hrv}ms HRV</span>}
+            {steps > 0 && <span>🚶 {(steps / 1000).toFixed(1)}k · {miles}mi</span>}
+            {!hasData && <span style={{ color: "#3a3a3a" }}>Tap sync to load</span>}
+          </div>
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); ouraConnected ? doSync() : setShowManual(true); }}
-          style={{ background: syncing ? "#282828" : "#1ed76022", color: syncing ? "#6a6a6a" : "#1ed760", borderRadius: 9999, padding: "5px 12px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}
-        >
-          {syncing ? "…" : ouraConnected ? "Sync" : "Log"}
-        </button>
+
+        {/* Actions + chevron */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={e => { e.stopPropagation(); ouraOn ? doSync() : setShowManual(true); }}
+            style={{ background: syncing ? "#252525" : "#1ed76018", color: syncing ? "#6a6a6a" : "#1ed760", borderRadius: 9999, padding: "4px 10px", fontSize: 10, fontWeight: 700 }}
+          >
+            {syncing ? "…" : ouraOn ? "Sync" : "Log"}
+          </button>
+          <svg width="8" height="12" viewBox="0 0 8 12"><path d="M1 1L7 6L1 11" stroke="#3a3a3a" strokeWidth="1.5" strokeLinecap="round" fill="none" /></svg>
+        </div>
       </button>
 
-      {expanded && hasSleepData && (
-        <div className="fade-in" style={{ background: "#151515", borderRadius: "0 0 12px 12px", padding: "12px 16px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              ["Deep", todaySleep.deepMins ? `${todaySleep.deepMins}m` : "—"],
-              ["REM", todaySleep.remMins ? `${todaySleep.remMins}m` : "—"],
-              ["HR", todaySleep.restingHR ? `${todaySleep.restingHR}bpm` : "—"],
-              ["HRV", todaySleep.hrv ? `${todaySleep.hrv}ms` : "—"],
-              ["Eff", todaySleep.efficiency ? `${todaySleep.efficiency}%` : "—"],
-              ["Steps", todaySleep.steps ? `${(todaySleep.steps/1000).toFixed(1)}k` : "—"],
-            ].map(([label, val]) => (
-              <div key={label} style={{ textAlign: "center" }}>
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 16, color: "#ffffff", lineHeight: 1 }}>{val}</div>
-                <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 2 }}>{label}</div>
+      {/* ── DRILL-DOWN SHEET ──────────────────────────────────────────── */}
+      {showDrill && (
+        <div
+          className="fade-in"
+          style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.92)", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}
+          onClick={e => { if (e.target === e.currentTarget) setShowDrill(false); }}
+        >
+          <div style={{ background: "#121212", borderRadius: "24px 24px 0 0", maxHeight: "92vh", overflowY: "auto", width: "100%", maxWidth: 480, margin: "0 auto", paddingBottom: 48 }}>
+            {/* Handle */}
+            <div style={{ display: "flex", justifyContent: "center", paddingTop: 12, paddingBottom: 6 }}>
+              <div style={{ width: 36, height: 4, background: "#282828", borderRadius: 9999 }} />
+            </div>
+
+            {/* Sheet header */}
+            <div style={{ padding: "8px 20px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 20 }}>Recovery</div>
+                <div style={{ fontSize: 11, color: "#6a6a6a", marginTop: 2 }}>
+                  {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                </div>
               </div>
-            ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                {ouraOn && (
+                  <button onClick={() => doSync()} style={{ background: "#1ed76018", color: "#1ed760", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700 }}>
+                    {syncing ? "Syncing…" : "Sync"}
+                  </button>
+                )}
+                <button onClick={() => { setShowDrill(false); setShowManual(true); }} style={{ background: "#282828", color: "#ffffff", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700 }}>
+                  Edit
+                </button>
+              </div>
+            </div>
+
+            {/* Score trilogy */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "0 20px 16px" }}>
+              {[
+                { label: "SLEEP", val: sleepScore, sub: tod.hours ? `${tod.hours}h` : null },
+                { label: "READINESS", val: readinessScore, sub: null },
+                { label: "ACTIVITY", val: activityScore, sub: steps ? `${(steps / 1000).toFixed(1)}k steps` : null },
+              ].map(({ label, val, sub }) => (
+                <div key={label} style={{ background: "#181818", borderRadius: 14, padding: "14px 10px", textAlign: "center" }}>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: val ? scoreColor(val) : "#2a2a2a", lineHeight: 1 }}>{val || "—"}</div>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: "#6a6a6a", letterSpacing: 1, marginTop: 4 }}>{label}</div>
+                  {sub && <div style={{ fontSize: 10, color: "#b3b3b3", marginTop: 3 }}>{sub}</div>}
+                </div>
+              ))}
+            </div>
+
+            {/* Sleep detail grid */}
+            {hasData && (
+              <div style={{ margin: "0 20px 12px", background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
+                <div style={{ fontSize: 10, color: "#6a6a6a", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>Sleep Detail</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                  {[
+                    { label: "Deep", val: tod.deepMins ? `${tod.deepMins}m` : "—" },
+                    { label: "REM", val: tod.remMins ? `${tod.remMins}m` : "—" },
+                    { label: "Light", val: (tod.hours && tod.deepMins != null && tod.remMins != null) ? `${Math.max(0, Math.round(tod.hours * 60 - tod.deepMins - tod.remMins))}m` : "—" },
+                    { label: "HRV", val: tod.hrv ? `${tod.hrv}ms` : "—" },
+                    { label: "Resting HR", val: tod.restingHR ? `${tod.restingHR}bpm` : "—" },
+                    { label: "Efficiency", val: tod.efficiency ? `${tod.efficiency}%` : "—" },
+                  ].map(({ label, val }) => (
+                    <div key={label} style={{ textAlign: "center" }}>
+                      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#ffffff", lineHeight: 1 }}>{val}</div>
+                      <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 3 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Activity detail */}
+            {(steps > 0 || tod.activeCalories > 0) && (
+              <div style={{ margin: "0 20px 12px", background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
+                <div style={{ fontSize: 10, color: "#6a6a6a", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>Activity</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                  {[
+                    { label: "Steps", val: steps ? steps.toLocaleString() : "—" },
+                    { label: "Distance", val: miles ? `${miles} mi` : "—" },
+                    { label: "Active Cal", val: tod.activeCalories ? `${tod.activeCalories}` : "—" },
+                  ].map(({ label, val }) => (
+                    <div key={label} style={{ textAlign: "center" }}>
+                      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#ffffff", lineHeight: 1 }}>{val}</div>
+                      <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 3 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Steps progress bar toward 8k goal */}
+                {steps > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ height: 4, background: "#252525", borderRadius: 9999 }}>
+                      <div style={{ height: "100%", width: `${Math.min(100, (steps / 8000) * 100)}%`, background: steps >= 8000 ? "#1ed760" : "#ffa42b", borderRadius: 9999, transition: "width 0.4s" }} />
+                    </div>
+                    <div style={{ fontSize: 9, color: "#6a6a6a", marginTop: 4 }}>{steps >= 8000 ? "Goal met" : `${(8000 - steps).toLocaleString()} steps to 8k goal`}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 14-DAY HISTORY ──────────────────────────────────────── */}
+            <div style={{ padding: "0 20px" }}>
+              <div style={{ fontSize: 10, color: "#6a6a6a", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>14-Day History</div>
+
+              {/* Sleep score bars */}
+              <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700 }}>Sleep Score</span>
+                  {sleepScore ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(sleepScore) }}>{sleepScore} today</span> : null}
+                </div>
+                <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 48 }}>
+                  {last14.map(({ ds, data, isToday }) => {
+                    const s = data.score;
+                    const h = s ? Math.max(5, (s / 100) * 44) : 4;
+                    return (
+                      <div key={ds} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                        <div style={{ width: "100%", height: h, background: s ? (isToday ? scoreColor(s) : `${scoreColor(s)}55`) : "#252525", borderRadius: "3px 3px 0 0", transition: "height 0.3s" }} />
+                        {isToday && <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#ffffff", flexShrink: 0 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>{last14[0].dayLabel}</span>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>Today</span>
+                </div>
+              </div>
+
+              {/* Steps bars */}
+              <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700 }}>Steps & Distance</span>
+                  {steps ? <span style={{ fontSize: 11, fontWeight: 700, color: steps >= 8000 ? "#1ed760" : "#ffa42b" }}>{miles}mi today</span> : null}
+                </div>
+                <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 48 }}>
+                  {last14.map(({ ds, data, isToday }) => {
+                    const s = data.steps || 0;
+                    const maxS = Math.max(...last14.map(x => x.data.steps || 0), 10000);
+                    const h = s ? Math.max(5, (s / maxS) * 44) : 4;
+                    const goalMet = s >= 8000;
+                    const bar = isToday ? (goalMet ? "#1ed760" : "#ffa42b") : (s ? (goalMet ? "#1ed76055" : "#ffa42b44") : "#252525");
+                    return (
+                      <div key={ds} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                        <div style={{ width: "100%", height: s ? h : 4, background: bar, borderRadius: "3px 3px 0 0" }} />
+                        {isToday && <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#ffffff", flexShrink: 0 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>{last14[0].dayLabel}</span>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>Goal: 8k</span>
+                </div>
+              </div>
+
+              {/* Readiness bars */}
+              <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700 }}>Readiness</span>
+                  {readinessScore ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(readinessScore) }}>{readinessScore} today</span> : null}
+                </div>
+                <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 48 }}>
+                  {last14.map(({ ds, data, isToday }) => {
+                    const s = data.readinessScore;
+                    const h = s ? Math.max(5, (s / 100) * 44) : 4;
+                    return (
+                      <div key={ds} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                        <div style={{ width: "100%", height: h, background: s ? (isToday ? scoreColor(s) : `${scoreColor(s)}55`) : "#252525", borderRadius: "3px 3px 0 0", transition: "height 0.3s" }} />
+                        {isToday && <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#ffffff", flexShrink: 0 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>{last14[0].dayLabel}</span>
+                  <span style={{ fontSize: 9, color: "#3a3a3a" }}>Today</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {showManual && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end" }} onClick={e => { if (e.target === e.currentTarget) setShowManual(false); }}>
-          <div style={{ background: "#181818", borderRadius: "20px 20px 0 0", padding: "20px 20px 48px", width: "100%", maxWidth: 480, margin: "0 auto" }}>
-            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>Log Sleep</div>
-            <div style={{ fontSize: 11, color: "#b3b3b3", marginBottom: 6 }}>Hours slept</div>
-            <input type="number" inputMode="decimal" placeholder="7.5" value={manualHours} onChange={e => setManualHours(e.target.value)} style={{ marginBottom: 12 }} />
-            <button onClick={() => { if (manualHours) { saveSleep(date, { ...todaySleep, hours: parseFloat(manualHours) }); setShowManual(false); setManualHours(""); } }} style={{ width: "100%", background: "#1ed760", color: "#000", borderRadius: 9999, padding: 12, fontWeight: 700, fontSize: 14 }}>Save</button>
-          </div>
-        </div>
-      )}
+      {/* Manual log sheet */}
+      {showManual && <ManualSleepSheet tod={tod} date={date} saveSleep={saveSleep} onClose={() => setShowManual(false)} />}
+    </>
+  );
+}
+
+function ManualSleepSheet({ tod, date, saveSleep, onClose }) {
+  const [form, setForm] = useState({ hours: tod.hours ? String(tod.hours) : "", score: tod.score ? String(tod.score) : "" });
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "flex-end" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#181818", borderRadius: "20px 20px 0 0", padding: "20px 20px 48px", width: "100%", maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>Log Recovery</div>
+        <div style={{ fontSize: 11, color: "#b3b3b3", marginBottom: 6 }}>Hours slept</div>
+        <input type="number" inputMode="decimal" placeholder="7.5" value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} style={{ marginBottom: 12 }} />
+        <div style={{ fontSize: 11, color: "#b3b3b3", marginBottom: 6 }}>Sleep score (optional)</div>
+        <input type="number" inputMode="numeric" placeholder="78" value={form.score} onChange={e => setForm(f => ({ ...f, score: e.target.value }))} style={{ marginBottom: 16 }} />
+        <button
+          onClick={() => {
+            if (!form.hours) return;
+            saveSleep(date, { ...tod, hours: parseFloat(form.hours), ...(form.score ? { score: parseInt(form.score) } : {}) });
+            onClose();
+          }}
+          style={{ width: "100%", background: "#1ed760", color: "#000", borderRadius: 9999, padding: 12, fontWeight: 700, fontSize: 14 }}
+        >Save</button>
+      </div>
     </div>
   );
 }
