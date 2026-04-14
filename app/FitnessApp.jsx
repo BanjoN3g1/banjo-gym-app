@@ -316,6 +316,75 @@ async function syncOuraForDate(date) {
   return Object.keys(result).length ? result : null;
 }
 
+// Batch-fetch last N days of Oura data in one API call per endpoint
+async function syncOuraHistory(days = 14) {
+  const endDate = today();
+  const startD = new Date();
+  startD.setDate(startD.getDate() - (days - 1));
+  const startDate = localDateStr(startD);
+
+  const [dailySleepRes, sleepRes, activityRes, readinessRes] = await Promise.all([
+    fetchOura("daily_sleep",    { start_date: startDate, end_date: endDate }),
+    fetchOura("sleep",          { start_date: startDate, end_date: endDate }),
+    fetchOura("daily_activity", { start_date: startDate, end_date: endDate }),
+    fetchOura("daily_readiness",{ start_date: startDate, end_date: endDate }),
+  ]);
+
+  const byDate = {};
+
+  if (dailySleepRes?.data) {
+    for (const item of dailySleepRes.data) {
+      const d = item.day;
+      if (!byDate[d]) byDate[d] = {};
+      if (item.score) byDate[d].score = item.score;
+    }
+  }
+
+  if (sleepRes?.data) {
+    const sessionsByDay = {};
+    for (const s of sleepRes.data) {
+      const d = s.day;
+      if (!sessionsByDay[d]) sessionsByDay[d] = [];
+      sessionsByDay[d].push(s);
+    }
+    for (const [d, sessions] of Object.entries(sessionsByDay)) {
+      const filtered = sessions.filter(s => s.type !== "rest" && s.type !== "late_nap");
+      const pool = filtered.length ? filtered : sessions;
+      const main = pool.reduce((best, s) =>
+        (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best
+      , pool[0]);
+      if (!byDate[d]) byDate[d] = {};
+      byDate[d].hours      = Math.round((main.total_sleep_duration  || 0) / 360) / 10;
+      byDate[d].hrv        = Math.round(main.average_hrv            || 0) || null;
+      byDate[d].deepMins   = Math.round((main.deep_sleep_duration   || 0) / 60);
+      byDate[d].remMins    = Math.round((main.rem_sleep_duration    || 0) / 60);
+      byDate[d].efficiency = main.efficiency                        || null;
+      byDate[d].restingHR  = Math.round(main.average_heart_rate    || 0) || null;
+      if (!byDate[d].score) byDate[d].score = main.score           || null;
+    }
+  }
+
+  if (activityRes?.data) {
+    for (const act of activityRes.data) {
+      const d = act.day;
+      if (!byDate[d]) byDate[d] = {};
+      byDate[d].steps          = act.steps           || 0;
+      byDate[d].activeCalories = act.active_calories || 0;
+      byDate[d].activityScore  = act.score           || null;
+    }
+  }
+
+  if (readinessRes?.data) {
+    for (const r of readinessRes.data) {
+      const d = r.day;
+      if (!byDate[d]) byDate[d] = {};
+      byDate[d].readinessScore = r.score || null;
+    }
+  }
+
+  return byDate; // { "2026-04-01": { score, hours, steps, ... }, ... }
+}
+
 // ─── AI ──────────────────────────────────────────────────────────────────────
 function getApiKey() {
   return localStorage.getItem("banjo_api_key") || "";
@@ -767,25 +836,23 @@ export default function App() {
     }
   }, []);
 
-  // Auto-sync Oura on mount if connected and data is missing
+  // Auto-sync Oura on mount: full 14-day history if connected
   useEffect(() => {
     if (!isOuraConnected()) return;
     const hour = new Date().getHours();
-    if (hour < 6) return; // Oura data not ready yet
-    const todayStr = today();
-    setSleep(prev => {
-      if (!prev[todayStr]?.hours) {
-        syncOuraForDate(todayStr).then(data => {
-          if (data) {
-            setSleep(prevInner => {
-              const next = { ...prevInner, [todayStr]: { ...(prevInner[todayStr] || {}), ...data } };
-              store.set("sleep", next);
-              return next;
-            });
+    if (hour < 6) return;
+    syncOuraHistory(14).then(byDate => {
+      if (!byDate || !Object.keys(byDate).length) return;
+      setSleep(prev => {
+        const next = { ...prev };
+        for (const [d, data] of Object.entries(byDate)) {
+          if (Object.keys(data).length) {
+            next[d] = { ...(prev[d] || {}), ...data };
           }
-        });
-      }
-      return prev;
+        }
+        store.set("sleep", next);
+        return next;
+      });
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -806,6 +873,17 @@ export default function App() {
     setSleep(next);
     store.set("sleep", next);
   }, [sleep]);
+
+  const saveSleepAll = useCallback((byDate) => {
+    setSleep(prev => {
+      const next = { ...prev };
+      for (const [d, data] of Object.entries(byDate)) {
+        if (Object.keys(data).length) next[d] = { ...(prev[d] || {}), ...data };
+      }
+      store.set("sleep", next);
+      return next;
+    });
+  }, []);
 
   const saveBW = useCallback((date, val) => {
     const next = { ...bodyweight, [date]: val };
@@ -1121,7 +1199,7 @@ function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNu
 
       {/* ── RECOVERY ──────────────────────────────────────────────────── */}
       <div style={{ marginTop: 0, padding: "0 16px 12px" }}>
-        <OuraDashboard sleep={sleep} saveSleep={saveSleep} date={d} />
+        <OuraDashboard sleep={sleep} saveSleep={saveSleep} saveSleepAll={saveSleepAll} date={d} />
       </div>
 
       {/* ── WEIGHT TREND + PACE ───────────────────────────────────────── */}
@@ -1243,24 +1321,30 @@ function HomeTab({ logs, nutrition, sleep, bodyweight, saveBW, saveSleep, saveNu
 }
 
 // ─── OURA DASHBOARD ───────────────────────────────────────────────────────────
-function OuraDashboard({ sleep, saveSleep, date }) {
+function OuraDashboard({ sleep, saveSleep, saveSleepAll, date }) {
   const [syncing, setSyncing] = useState(false);
   const [showDrill, setShowDrill] = useState(false);
   const [showManual, setShowManual] = useState(false);
-  const [manualForm, setManualForm] = useState({ hours: "", score: "" });
   const ouraOn = isOuraConnected();
-  const tod = sleep[date] || {};
-  const hasData = (tod.hours > 0) || (tod.score > 0) || (tod.steps > 0);
 
   const scoreColor = (s) => !s ? "#3a3a3a" : s >= 85 ? "#1ed760" : s >= 70 ? "#ffa42b" : "#f3727f";
-  const stepsToMiles = (s) => s ? (s / 2000).toFixed(1) : null;
 
-  const doSync = async (targetDate) => {
+  // Compact card shows YESTERDAY — sleep is last night, steps are yesterday's complete count
+  const ystD = (() => { const d2 = new Date(); d2.setDate(d2.getDate() - 1); return localDateStr(d2); })();
+  const yst = sleep[ystD] || {};
+  const tod = sleep[date] || {};
+  // Use yesterday for compact display; fall back to today if yesterday has no data
+  const cardData = (yst.hours > 0 || yst.score > 0 || yst.steps > 0) ? yst : tod;
+  const cardDate = cardData === yst ? ystD : date;
+  const hasCardData = (cardData.hours > 0) || (cardData.score > 0) || (cardData.steps > 0);
+
+  // Full history sync (14 days)
+  const doSyncHistory = async () => {
     if (!ouraOn) return;
     setSyncing(true);
     try {
-      const data = await syncOuraForDate(targetDate || date);
-      if (data) saveSleep(targetDate || date, { ...(sleep[targetDate || date] || {}), ...data });
+      const byDate = await syncOuraHistory(14);
+      if (byDate && Object.keys(byDate).length) saveSleepAll(byDate);
     } catch {}
     setSyncing(false);
   };
@@ -1273,13 +1357,11 @@ function OuraDashboard({ sleep, saveSleep, date }) {
     return { ds, data: sleep[ds] || {}, isToday: ds === date, dayLabel: ["Su","Mo","Tu","We","Th","Fr","Sa"][d2.getDay()] };
   });
 
-  const sleepScore = tod.score;
-  const readinessScore = tod.readinessScore;
-  const activityScore = tod.activityScore;
-  const steps = tod.steps;
-  const miles = stepsToMiles(steps);
+  const sleepScore = cardData.score;
+  const steps = cardData.steps;
+  const miles = steps ? (steps / 2000).toFixed(1) : null;
 
-  if (!ouraOn && !hasData) return (
+  if (!ouraOn && !hasCardData) return (
     <>
       <div style={{ background: "#181818", borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
@@ -1323,28 +1405,35 @@ function OuraDashboard({ sleep, saveSleep, date }) {
           </div>
         </div>
 
-        {/* Metrics summary */}
+        {/* Metrics: sleep hours + steps/miles */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>Recovery</span>
-            {readinessScore ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: scoreColor(readinessScore), background: `${scoreColor(readinessScore)}18`, borderRadius: 9999, padding: "2px 8px" }}>
-                {readinessScore} ready
-              </span>
-            ) : null}
-          </div>
-          <div style={{ fontSize: 11, color: "#b3b3b3", display: "flex", flexWrap: "wrap", gap: "2px 10px" }}>
-            {tod.hours > 0 && <span>💤 {tod.hours}h</span>}
-            {tod.hrv > 0 && <span>❤️ {tod.hrv}ms HRV</span>}
-            {steps > 0 && <span>🚶 {(steps / 1000).toFixed(1)}k · {miles}mi</span>}
-            {!hasData && <span style={{ color: "#3a3a3a" }}>Tap sync to load</span>}
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Last Night</div>
+          <div style={{ display: "flex", gap: 14 }}>
+            {/* Sleep */}
+            <div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: sleepScore ? scoreColor(sleepScore) : "#ffffff", lineHeight: 1 }}>
+                {cardData.hours > 0 ? `${cardData.hours}h` : "—"}
+              </div>
+              <div style={{ fontSize: 9, color: "#6a6a6a", fontWeight: 700, letterSpacing: 0.5, marginTop: 1 }}>SLEEP</div>
+            </div>
+            {/* Divider */}
+            <div style={{ width: 1, background: "#252525", alignSelf: "stretch" }} />
+            {/* Steps + miles */}
+            <div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: "#ffffff", lineHeight: 1 }}>
+                {steps > 0 ? `${(steps / 1000).toFixed(1)}k` : "—"}
+              </div>
+              <div style={{ fontSize: 9, color: "#6a6a6a", fontWeight: 700, letterSpacing: 0.5, marginTop: 1 }}>
+                {miles ? `${miles} MI` : "STEPS"}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Actions + chevron */}
+        {/* Sync + chevron */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
           <button
-            onClick={e => { e.stopPropagation(); ouraOn ? doSync() : setShowManual(true); }}
+            onClick={e => { e.stopPropagation(); ouraOn ? doSyncHistory() : setShowManual(true); }}
             style={{ background: syncing ? "#252525" : "#1ed76018", color: syncing ? "#6a6a6a" : "#1ed760", borderRadius: 9999, padding: "4px 10px", fontSize: 10, fontWeight: 700 }}
           >
             {syncing ? "…" : ouraOn ? "Sync" : "Log"}
@@ -1376,8 +1465,8 @@ function OuraDashboard({ sleep, saveSleep, date }) {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {ouraOn && (
-                  <button onClick={() => doSync()} style={{ background: "#1ed76018", color: "#1ed760", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700 }}>
-                    {syncing ? "Syncing…" : "Sync"}
+                  <button onClick={() => doSyncHistory()} style={{ background: "#1ed76018", color: "#1ed760", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700 }}>
+                    {syncing ? "Syncing…" : "Sync 14d"}
                   </button>
                 )}
                 <button onClick={() => { setShowDrill(false); setShowManual(true); }} style={{ background: "#282828", color: "#ffffff", borderRadius: 9999, padding: "7px 14px", fontSize: 11, fontWeight: 700 }}>
@@ -1386,12 +1475,12 @@ function OuraDashboard({ sleep, saveSleep, date }) {
               </div>
             </div>
 
-            {/* Score trilogy */}
+            {/* Score trilogy — uses cardData (yesterday) */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "0 20px 16px" }}>
               {[
-                { label: "SLEEP", val: sleepScore, sub: tod.hours ? `${tod.hours}h` : null },
-                { label: "READINESS", val: readinessScore, sub: null },
-                { label: "ACTIVITY", val: activityScore, sub: steps ? `${(steps / 1000).toFixed(1)}k steps` : null },
+                { label: "SLEEP", val: cardData.score, sub: cardData.hours ? `${cardData.hours}h` : null },
+                { label: "READINESS", val: cardData.readinessScore, sub: null },
+                { label: "ACTIVITY", val: cardData.activityScore, sub: steps ? `${(steps / 1000).toFixed(1)}k steps` : null },
               ].map(({ label, val, sub }) => (
                 <div key={label} style={{ background: "#181818", borderRadius: 14, padding: "14px 10px", textAlign: "center" }}>
                   <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: val ? scoreColor(val) : "#2a2a2a", lineHeight: 1 }}>{val || "—"}</div>
@@ -1402,17 +1491,17 @@ function OuraDashboard({ sleep, saveSleep, date }) {
             </div>
 
             {/* Sleep detail grid */}
-            {hasData && (
+            {hasCardData && (
               <div style={{ margin: "0 20px 12px", background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
                 <div style={{ fontSize: 10, color: "#6a6a6a", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>Sleep Detail</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
                   {[
-                    { label: "Deep", val: tod.deepMins ? `${tod.deepMins}m` : "—" },
-                    { label: "REM", val: tod.remMins ? `${tod.remMins}m` : "—" },
-                    { label: "Light", val: (tod.hours && tod.deepMins != null && tod.remMins != null) ? `${Math.max(0, Math.round(tod.hours * 60 - tod.deepMins - tod.remMins))}m` : "—" },
-                    { label: "HRV", val: tod.hrv ? `${tod.hrv}ms` : "—" },
-                    { label: "Resting HR", val: tod.restingHR ? `${tod.restingHR}bpm` : "—" },
-                    { label: "Efficiency", val: tod.efficiency ? `${tod.efficiency}%` : "—" },
+                    { label: "Deep", val: cardData.deepMins ? `${cardData.deepMins}m` : "—" },
+                    { label: "REM", val: cardData.remMins ? `${cardData.remMins}m` : "—" },
+                    { label: "Light", val: (cardData.hours && cardData.deepMins != null && cardData.remMins != null) ? `${Math.max(0, Math.round(cardData.hours * 60 - cardData.deepMins - cardData.remMins))}m` : "—" },
+                    { label: "HRV", val: cardData.hrv ? `${cardData.hrv}ms` : "—" },
+                    { label: "Resting HR", val: cardData.restingHR ? `${cardData.restingHR}bpm` : "—" },
+                    { label: "Efficiency", val: cardData.efficiency ? `${cardData.efficiency}%` : "—" },
                   ].map(({ label, val }) => (
                     <div key={label} style={{ textAlign: "center" }}>
                       <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#ffffff", lineHeight: 1 }}>{val}</div>
@@ -1424,14 +1513,14 @@ function OuraDashboard({ sleep, saveSleep, date }) {
             )}
 
             {/* Activity detail */}
-            {(steps > 0 || tod.activeCalories > 0) && (
+            {(steps > 0 || cardData.activeCalories > 0) && (
               <div style={{ margin: "0 20px 12px", background: "#181818", borderRadius: 14, padding: "14px 16px" }}>
                 <div style={{ fontSize: 10, color: "#6a6a6a", fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>Activity</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
                   {[
                     { label: "Steps", val: steps ? steps.toLocaleString() : "—" },
                     { label: "Distance", val: miles ? `${miles} mi` : "—" },
-                    { label: "Active Cal", val: tod.activeCalories ? `${tod.activeCalories}` : "—" },
+                    { label: "Active Cal", val: cardData.activeCalories ? `${cardData.activeCalories}` : "—" },
                   ].map(({ label, val }) => (
                     <div key={label} style={{ textAlign: "center" }}>
                       <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: "#ffffff", lineHeight: 1 }}>{val}</div>
@@ -1439,7 +1528,6 @@ function OuraDashboard({ sleep, saveSleep, date }) {
                     </div>
                   ))}
                 </div>
-                {/* Steps progress bar toward 8k goal */}
                 {steps > 0 && (
                   <div style={{ marginTop: 12 }}>
                     <div style={{ height: 4, background: "#252525", borderRadius: 9999 }}>
@@ -1459,7 +1547,7 @@ function OuraDashboard({ sleep, saveSleep, date }) {
               <div style={{ background: "#181818", borderRadius: 14, padding: "14px 16px", marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 11, color: "#b3b3b3", fontWeight: 700 }}>Sleep Score</span>
-                  {sleepScore ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(sleepScore) }}>{sleepScore} today</span> : null}
+                  {cardData.score ? <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor(cardData.score) }}>{cardData.score} last night</span> : null}
                 </div>
                 <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 48 }}>
                   {last14.map(({ ds, data, isToday }) => {
